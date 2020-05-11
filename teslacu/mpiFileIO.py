@@ -44,14 +44,12 @@ http://tesla.colorado.edu
 from mpi4py import MPI
 import numpy as np
 import os
-# from vtk import vtkStructuredPointsReader
-# from vtk.util import numpy_support as vn
 
 __all__ = []
 
 
-def mpiFileIO(comm=MPI.COMM_WORLD, idir='./', odir='./', ftype='binary',
-              N=512, ndims=3, decomp=None, periodic=None):
+def mpiFileIO(comm=MPI.COMM_WORLD, idir='./', odir='./', ftype=None,
+              ndims=3, N=[512]*3, decomp=None, **kwargs):
     """
     The mpiFileIO() function is a "class factory" which returns the
     appropriate mpi-parallel reader class instance based upon the
@@ -62,10 +60,14 @@ def mpiFileIO(comm=MPI.COMM_WORLD, idir='./', odir='./', ftype='binary',
     Output:
     """
 
-    if ftype == 'binary':
-        newFileIO = _binaryFileIO(comm, idir, N, ndims, decomp, periodic)
+    if ftype in ['binary', None]:
+        periodic = kwargs.pop('periodic', None)
+        ixs = kwargs.pop('ixs', None)
+        ixe = kwargs.pop('ixe', None)
+        newFileIO = _binaryFileIO(comm, idir, odir, ndims, N, decomp, periodic,
+                                  ixs, ixe)
     else:
-        newFileIO = _binaryFileIO(comm, idir, N, ndims, decomp, periodic)
+        raise ValueError('unknown ftype!')
 
     return newFileIO
 # -----------------------------------------------------------------------------
@@ -81,7 +83,7 @@ class _binaryFileIO(object):
     # -------------------------------------------------------------------------
     # Class Instantiator
     # -------------------------------------------------------------------------
-    def __init__(self, comm, idir, odir, N, ndims, decomp, periodic):
+    def __init__(self, comm, idir, odir, ndims, N, decomp, periodic, ixs, ixe):
 
         self.idir = idir  # users should be able to change directories at will
         self.odir = odir  # users should be able to change directories at will
@@ -92,13 +94,14 @@ class _binaryFileIO(object):
 
         if np.iterable(N):
             if len(N) == 1:
-                self._nx = np.array(list(N)*ndims, dtype=int)
+                self._nxf = np.array(list(N)*ndims, dtype=int)
             elif len(N) == ndims:
-                self._nx = np.array(N, dtype=int)
+                self._nxf = np.array(N, dtype=int)
             else:
                 raise IndexError("The length of N must be either 1 or ndims")
         else:
-            self._nx = np.array([N]*ndims, dtype=int)
+            self._nxf = np.array([N]*ndims, dtype=int)
+        nxf = self._nxf
 
         if decomp is None:
             self._decomp = 1
@@ -115,15 +118,36 @@ class _binaryFileIO(object):
             raise IndexError("Either len(periodic) must be ndims or "
                              "periodic must be None")
 
+        if ixs is not None:
+            if len(ixs) == 1:
+                ixs = np.array(list(ixs)*ndims, dtype=int)
+            elif len(ixs) == ndims:
+                ixs = np.array(ixs, dtype=int)
+            else:
+                raise IndexError("The length of ixs must be either 1 or ndims")
+        else:
+            ixs = np.zeros(ndims, dtype=np.int32)
+
+        if ixe is not None:
+            if len(ixe) == 1:
+                ixe = np.array(list(ixe)*ndims, dtype=int)
+            elif len(ixe) == ndims:
+                ixe = np.array(ixe, dtype=int)
+            else:
+                raise IndexError("The length of ixe must be either 1 or ndims")
+        else:
+            ixe = nxf
+
         dims = MPI.Compute_dims(init_comm.size, self._decomp)
         dims.extend([1]*(ndims-self._decomp))
-
-        assert np.all(np.mod(self._nx, dims) == 0)
-
         self._comm = init_comm.Create_cart(dims, self._periodic)
+
+        self._nx = ixe - ixs
         self._nnx = self._nx//dims
-        self._ixs = self._nnx*self.comm.coords
-        self._ixe = self._ixs+self._nnx
+        self._ixs = ixs + self._nnx*self.comm.coords
+        self._ixe = self._ixs + self._nnx
+
+        assert np.all(np.mod(self._nxf, dims) == 0)
 
     # -------------------------------------------------------------------------
     # Class Properities
@@ -176,7 +200,8 @@ class _binaryFileIO(object):
     # -------------------------------------------------------------------------
     def Read_all(self, filename, ftype=np.float32, mtype=np.float32):
         """
-        Empty docstring!
+        Read an entire file into MPI-distributed memory with n-dimensional
+        decomposition specified during construction of mpiFileIO object.
         """
         ftype = np.dtype(ftype)
         mtype = np.dtype(mtype)
@@ -192,7 +217,7 @@ class _binaryFileIO(object):
 
         fh = MPI.File.Open(self.comm, os.path.join(self.idir, filename))
 
-        # adding a loop over disp would allow for multiple scalars per file
+        # adding a loop over disp would allow for files with multiple scalars
         disp = 0
         fh.Set_view(disp, etype, filetype, 'native')
         fh.Read_all(temp, status)
@@ -203,7 +228,8 @@ class _binaryFileIO(object):
 
     def Write_all(self, filename, data, ftype=np.float32):
         """
-        Empty docstring!
+        Write an entire file into MPI-distributed memory with n-dimensional
+        decomposition specified during construction of mpiFileIO object.
         """
         assert np.all(np.array(data.shape) == self._nnx)
 
@@ -230,6 +256,25 @@ class _binaryFileIO(object):
         return status
 
     def _Create_subarray(self, key):
+        """Private module function.
+
+        [description]
+
+        Parameters
+        ----------
+        key : {[type]}
+            [description]
+
+        Returns
+        -------
+        [type]
+            [description]
+
+        Raises
+        ------
+        ValueError
+            [description]
+        """
 
         if key == 'f4':
             etype = MPI.REAL4
@@ -250,7 +295,7 @@ class _binaryFileIO(object):
                              " modify this if/elif structure with the"
                              " required MPI etype, if they know what it is.")
 
-        filetype = etype.Create_subarray(self._nx, self._nnx, self._ixs)
+        filetype = etype.Create_subarray(self._nxf, self._nnx, self._ixs)
         filetype.Commit()
 
         self._subarrays[key] = (etype, filetype)
@@ -260,7 +305,7 @@ class _binaryFileIO(object):
     def _Read_at_all_1d(self, filename, ftype=np.float32, mtype=np.float64):
         """
         A simpler function for reading in a file with 1D domain decomposition.
-        Probably also faster, as well, for small subdomain sizes.
+        Probably also faster, as well, but by how much needs to be measured.
         """
         temp = np.zeros(self.nnx, dtype=ftype)
         status = MPI.Status()
@@ -277,7 +322,7 @@ class _binaryFileIO(object):
     def _Write_at_all_1d(self, filename, data, ftype=np.float32):
         """
         A simpler function for writing to a file with 1D domain decomposition.
-        Probably also faster, as well, for small subdomain sizes.
+        Probably also faster, as well, but by how much needs to be measured.
         """
         assert np.all(np.array(data.shape) == self._nnx)
 

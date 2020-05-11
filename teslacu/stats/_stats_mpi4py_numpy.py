@@ -6,7 +6,10 @@ domain decomposition or dimensionality.
 from mpi4py import MPI
 import numpy as np
 
-__all__ = ['psum', 'central_moments', 'histogram1', 'histogram2']
+__all__ = ['psum', 'central_moments', 'conditional_mean',
+           'histogram1', 'histogram2']
+
+COMM_WORLD = MPI.COMM_WORLD
 
 
 def psum(data):
@@ -15,17 +18,50 @@ def psum(data):
     a 0D scalar value or 1D array.
     """
 
-    psum = np.array(data)  # np.array hard-copies, np.asarray might just point
+    psum = np.array(data)  # np.array always hard-copies
     for n in range(psum.ndim):
         psum.sort(axis=-1)
         psum = np.sum(psum, axis=-1)
     return psum
 
 
-def central_moments(comm, N, data, w=None, wbar=None, m1=None):
+def std_dev(data, N=None, w=None, wbar=None, m1=None, comm=COMM_WORLD):
+    """
+    Empty Docstring!
+    """
+
+    gmin = comm.allreduce(np.nanmin(data), op=MPI.MIN)
+    gmax = comm.allreduce(np.nanmax(data), op=MPI.MAX)
+
+    if w is None:   # unweighted moments
+        w = 1.0
+        wbar = 1.0
+    else:
+        assert w.size == data.size
+
+    if wbar is None:
+        wbar = comm.allreduce(psum(w), op=MPI.SUM)/w.size
+
+    if N is None:
+        N = data.size
+
+    N_inv = 1.0/(N*wbar)
+
+    # 1st (raw) moment
+    if m1 is None:
+        m1 = comm.allreduce(psum(w*data), op=MPI.SUM)*N_inv
+
+    cdata = data - m1
+    c2 = comm.allreduce(psum(w*np.power(cdata, 2)), op=MPI.SUM)*N_inv
+    std = c2**0.5
+
+    return std, m1, gmin, gmax
+
+
+def central_moments(data, N=None, w=None, wbar=None, m1=None, comm=COMM_WORLD):
     """
     Computes global min, max, and 1st to 6th central moments of
-    MPI-decomposed data.
+    MPI-distributed data.
 
     To get raw moments, simply pass in m1=0.
     To get weighted moments, bass in the weighting coefficients, w.
@@ -39,93 +75,171 @@ def central_moments(comm, N, data, w=None, wbar=None, m1=None):
     if w is None:   # unweighted moments
         w = 1.0
         wbar = 1.0
-    elif wbar is None:
-            wbar = comm.allreduce(psum(w), op=MPI.SUM)/N
+    else:
+        assert w.size == data.size
 
-    N = N*wbar
+    if wbar is None:
+        wbar = comm.allreduce(psum(w), op=MPI.SUM)/w.size
+
+    if N is None:
+        N = data.size
+
+    N_inv = 1.0/(N*wbar)
 
     # 1st raw moment
     if m1 is None:
-        m1 = comm.allreduce(psum(w*data), op=MPI.SUM)/N
+        m1 = comm.allreduce(psum(w*data), op=MPI.SUM)*N_inv
 
     # 2nd-4th centered moments
     cdata = data - m1
-    c2 = comm.allreduce(psum(w*np.power(cdata, 2)), op=MPI.SUM)/N
-    c3 = comm.allreduce(psum(w*np.power(cdata, 3)), op=MPI.SUM)/N
-    c4 = comm.allreduce(psum(w*np.power(cdata, 4)), op=MPI.SUM)/N
-    # c5 = comm.allreduce(psum(w*np.power(cdata, 5)), op=MPI.SUM)/N
-    # c6 = comm.allreduce(psum(w*np.power(cdata, 6)), op=MPI.SUM)/N
+    c2 = comm.allreduce(psum(w*np.power(cdata, 2)), op=MPI.SUM)*N_inv
+    c3 = comm.allreduce(psum(w*np.power(cdata, 3)), op=MPI.SUM)*N_inv
+    c4 = comm.allreduce(psum(w*np.power(cdata, 4)), op=MPI.SUM)*N_inv
+    c5 = comm.allreduce(psum(w*np.power(cdata, 5)), op=MPI.SUM)*N_inv
+    c6 = comm.allreduce(psum(w*np.power(cdata, 6)), op=MPI.SUM)*N_inv
 
-    return m1, c2, c3, c4, gmin, gmax
+    return m1, c2, c3, c4, c5, c6, gmin, gmax
 
 
-def histogram1(comm, N, data, range=None, bins=50, w=None, wbar=None, m1=None):
+def conditional_mean(var, cond, bins=100, range=None, comm=COMM_WORLD):
+    """Computes the MPI-distributed mean of `var` conditional on the
+    binned values of `cond`.
+
+    This is an MPI-distributed equivalent to calling
+    `scipy.stats.binned_static(cond, var, 'mean', bins, range)`.
+
+    Parameters
+    ----------
+    var : MPI-distributed ndarray
+        [description]
+    cond : MPI-distributed ndarray
+        [description]
+    bins : sequence or int, optional
+        An array_like sequence describing the bin edges or an integer
+        value describing the number of bins between the lower and upper
+        range values (the default is 100).
+    range : sequence, optional
+        A sequence of lower and upper bin edges to be used if the edges
+        are not given explicitly in `bins`. The default is to use the
+        MPI-reduced minimum and maximum values of `cond`.
+    comm : MPI.Comm, optional
+        MPI communicator over which `var` and `cond` are distrbuted.
+        (Default is MPI.COMM_WORLD)
+
+    Returns
+    -------
+    cond_mean : [N,]-shaped ndarray
+        (All ranks) ndarray of MPI-reduced conditional mean of `var`
+        with length N equal to the number of bins used to digitize `cond`.
+    digits : MPI-distribued ndarray
+        (local to rank) digitized and rightmost-edge-corrected `cond` array.
+    counts : [N+2,]-shaped ndarray
+        (All ranks) MPI-reduced histogram of `cond`, including outlier bins.
+    outliers : (2, )-shaped tuple
+        (All ranks) MPI-reduced mean of `var` conditioned on low and
+        high outliers of `cond` outside of provided `bin` edge sequence
+        or `range`.
     """
-    Constructs the histogram (probability mass function) of an MPI-
-    decomposed data.
+
+    # Get the range. Used only if number of bins is given.
+    if range is None:
+        fill = np.ma.minimum_fill_value(cond)
+        cmin = comm.allreduce(np.amin(cond, initial=fill), op=MPI.MIN)
+        cmax = comm.allreduce(np.amax(cond, initial=-fill), op=MPI.MAX)
+    else:
+        cmin, cmax = range
+
+    # Create edge arrays
+    if np.isscalar(bins):
+        nbin = bins + 2
+        edges = np.linspace(cmin, cmax, nbin - 1)
+    else:
+        edges = np.asarray(bins, float)
+        nbin = edges.size + 1
+
+    dedges = np.diff(edges)
+
+    # Compute the bin number each data point falls into
+    digits = np.digitize(cond, edges)
+
+    # Using `digitize`, values that fall on an edge are put in the right
+    # bin. For the rightmost bin, we want values equal to the right edge
+    # to be counted in the last bin, and not as an outlier.
+    # -- Find the rounding precision
+    decimal = int(-np.log10(dedges.min())) + 6
+    # -- Find which points are on the rightmost edge.
+    on_edge = np.where(np.around(cond, decimal) ==
+                       np.around(edges[-1], decimal))
+    # -- Shift these points one bin to the left.
+    digits[on_edge] -= 1
+    counts = np.bincount(digits.ravel(), minlength=nbin)
+
+    comm.Allreduce(MPI.IN_PLACE, counts, op=MPI.SUM)
+    valid = counts.nonzero()
+
+    binsum = np.bincount(digits.ravel(), var.ravel(), minlength=nbin)
+    comm.Allreduce(MPI.IN_PLACE, binsum, op=MPI.SUM)
+
+    cond_mean = np.empty(nbin, float)
+    cond_mean.fill(np.nan)
+    cond_mean[valid] = binsum[valid]/counts[valid]
+    outliers = (cond_mean[0], cond_mean[-1])
+    cond_mean = cond_mean[1:-1]
+
+    return cond_mean, digits, counts, outliers
+
+
+def histogram1(var, bins=50, range=None, w=None, comm=COMM_WORLD):
     """
-
-    if w is None:   # unweighted moments
-        w = np.ones_like(data)
-        wbar = 1
-    elif wbar is None:
-        wbar = comm.allreduce(psum(w), op=MPI.SUM)/N
-
-    N = N*wbar
-
-    # 1st raw moment
-    if m1 is None:
-        m1 = comm.allreduce(psum(w*data), op=MPI.SUM)/N
-
-    # 2nd raw moment
-    m2 = comm.allreduce(psum(w*np.power(data, 2)), op=MPI.SUM)/N
+    Constructs the histogram (probability mass function) of MPI-
+    distributed data. Now safe for null-sized arrays.
+    """
 
     if range is None:
-        gmin = comm.allreduce(np.nanmin(data), op=MPI.MIN)
-        gmax = comm.allreduce(np.nanmax(data), op=MPI.MAX)
+        fill = np.ma.minimum_fill_value(var)
+        gmin = comm.allreduce(np.amin(var, initial=fill), op=MPI.MIN)
+        gmax = comm.allreduce(np.amax(var, initial=-fill), op=MPI.MAX)
     else:
         (gmin, gmax) = range
 
-    width = (gmax-gmin)/bins
+    temp = np.histogram(var, bins=bins, range=(gmin, gmax), weights=w)[0]
+    lhist = np.ascontiguousarray(temp)
+    ghist = np.empty_like(lhist)
+    comm.Allreduce(lhist, ghist, op=MPI.SUM)
 
-    temp = np.histogram(data, bins=bins, range=(gmin, gmax), weights=w)[0]
-    hist = temp.astype(data.dtype, order='C')
-    comm.Allreduce(MPI.IN_PLACE, hist, op=MPI.SUM)
-    hist *= 1.0/hist.sum()  # makes this a probability mass function
-
-    return hist, m1, m2, gmin, gmax, width
+    return ghist, lhist, bins, gmin, gmax
 
 
-def histogram2(comm, var1, var2, xrange=None, yrange=None, bins=50, w=None):
+def histogram2(var1, var2, range=None, bins=50, w=None, comm=COMM_WORLD):
     """
     Constructs the 2D histogram (probability mass function) of two MPI-
-    decomposed data sets.
+    distributed data sets. Now safe for null-sized arrays.
     """
-
-    if xrange is None:
-        gmin1 = comm.allreduce(np.min(var1), op=MPI.MIN)
-        gmax1 = comm.allreduce(np.max(var1), op=MPI.MAX)
+    if np.iterable(bins):
+        bins1 = bins[0]
+        bins2 = bins[1]
     else:
-        (gmin1, gmax1) = xrange
+        bins1 = bins2 = bins
 
-    width1 = (gmax1-gmin1)/bins
+    if range is None:
+        fill = np.ma.minimum_fill_value(var1)
+        gmin1 = comm.allreduce(np.amin(var1, initial=fill), op=MPI.MIN)
+        gmax1 = comm.allreduce(np.amax(var1, initial=-fill), op=MPI.MAX)
 
-    if yrange is None:
-        gmin2 = comm.allreduce(np.min(var2), op=MPI.MIN)
-        gmax2 = comm.allreduce(np.max(var2), op=MPI.MAX)
+        fill = np.ma.minimum_fill_value(var2)
+        gmin2 = comm.allreduce(np.amin(var2, initial=fill), op=MPI.MIN)
+        gmax2 = comm.allreduce(np.amax(var2, initial=-fill), op=MPI.MAX)
+
+        range = ((gmin1, gmax1), (gmin2, gmax2))
     else:
-        (gmin2, gmax2) = yrange
+        ((gmin1, gmax1), (gmin2, gmax2)) = range
 
-    width2 = (gmax2-gmin2)/bins
+    temp = np.histogram2d(var1, var2, bins=bins, range=range, weights=w)[0]
+    lhist = np.ascontiguousarray(temp)
+    ghist = np.empty_like(lhist)
+    comm.Allreduce(lhist, ghist, op=MPI.SUM)
 
-    xy_range = [[gmin1, gmax1], [gmin2, gmax2]]
-
-    temp = np.histogram2d(var1, var2, bins=bins, range=xy_range, weights=w)[0]
-    hist = temp.astype(var1.dtype, order='C')
-    comm.Allreduce(MPI.IN_PLACE, hist, op=MPI.SUM)
-    hist *= 1.0/hist.sum()  # makes this a probability mass function
-
-    return hist, gmin1, gmax1, width1, gmin2, gmax2, width2
+    return ghist, lhist, bins1, bins2, range
 
 
 # def alt_local_moments(data, w=None, wbar=None, N=None, unbias=True):

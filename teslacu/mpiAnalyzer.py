@@ -62,7 +62,7 @@ import sys
 
 from . import fft as tcfft          # FFT transforms and math functions
 from . import stats as tcstats      # statistical functions
-from .diff import central as tcfd   # finite difference functions
+# from .diff import central as tcfd   # finite difference functions
 from .diff import akima as tcas     # Akima spline approximation functions
 
 __all__ = []
@@ -70,44 +70,81 @@ __all__ = []
 
 # -----------------------------------------------------------------------------
 def mpiAnalyzer(comm=MPI.COMM_WORLD, odir='./analysis/', pid='test',
-                ndims=3, decomp=None, periodic=None,
-                L=[2*np.pi]*3, N=[512]*3,
-                config='hit', method='spline_flux_diff',
-                **kwargs):
-    """
+                ndims=3, N=[512]*3, L=[2*np.pi]*3,
+                decomp=None, periodic=None, config=None,
+                method='akima_flux_diff', **kwargs):
+    """[summary]
+
     The mpiAnalyzer() function is a "class factory" which returns the
     appropriate mpi-parallel analyzer class instance based upon the
     inputs. Each subclass specializes the BaseAnalyzer for a different
     problem configuration that can be added to the if/elif branch of this
     factory.
 
-    Arguments:
+    Parameters
     ----------
-    comm: MPI communicator for the analyzer
+    **kwargs :
+        additional arguments documented by the subclasses
+    comm : {MPI.Comm}, optional
+        MPI communicator for the analyzer (the default is MPI.COMM_WORLD)
+    odir : {str}, optional
+        [description] (the default is './analysis/', which [default_description])
+    pid : {str}, optional
+        [description] (the default is 'test', which [default_description])
+    ndims : {number}, optional
+        [description] (the default is 3, which [default_description])
+    N : {list}, optional
+        [description] (the default is [512]*3, which [default_description])
+    L : {list}, optional
+        [description] (the default is [2*np.pi]*3, which [default_description])
+    decomp : {[type]}, optional
+        [description] (the default is None, which [default_description])
+    periodic : {[type]}, optional
+        [description] (the default is None, which [default_description])
+    config : {str}, optional
+        [description] (the default is 'hit', which [default_description])
+    method : {str}, optional
+        [description] (the default is 'akima_flux_diff', which [default_description])
 
+    Returns
+    -------
+    _baseAnalyzer object
+        Single instance of _baseAnalyzer or one of its subclasses
+    """
+    """
     odir: output directory of analysis products
-
     pid: problem ID (file prefix)
-
     ndims: number of spatial dimensions of global data (not subdomain)
-
     L: scalar or tuple of domain dimensions
-
     N: scalar or tuple of mesh dimensions
-
     config: problem configuration (switch)
-
-    kwargs: additional arguments to be handled by the subclasses
+    kwargs:
 
     Output:
     -------
-    Single instance of _baseAnalyzer or one of its subclasses
+
     """
 
+    if decomp in [2, 3] and method != 'akima_flux_diff':
+        print("WARNING: for 2D and 3D domain decompositions only Akima-spline"
+              " flux differencing is currently available.")
+        method = 'akima_flux_diff'
+
     if config == 'hit':
-        analyzer = _hitAnalyzer(comm, odir, pid, ndims, L, N, method)
+        if decomp not in [None, 1]:
+            print("WARNING: HIT configuration requires 1D domain "
+                  "decomposition in order to use the spectral analysis tools")
+
+        if periodic not in [None, True, ndims*(True, ), ndims*[True, ]]:
+            print("WARNING: HIT configuration assumes fully-periodic "
+                  "boundary conditions. User-supplied periodicity condition "
+                  "will be ignored.")
+
+        analyzer = _hitAnalyzer(comm, odir, pid, ndims, decomp, L, N, method)
+
     elif config is None:
-        analyzer = _baseAnalyzer(comm, odir, pid, ndims, L, N, method)
+        analyzer = _baseAnalyzer(comm, odir, pid, ndims, decomp, periodic,
+                                 L, N, method)
     else:
         if comm.rank == 0:
             print("mpiAnalyzer.factory configuration arguments not recognized!"
@@ -166,39 +203,53 @@ class _baseAnalyzer(object):
             elif len(N) == ndims:
                 self._nx = np.array(N, dtype=np.int)
             else:
-                raise IndexError("The length of N must be either 1 or ndims")
-        else:
+                raise ValueError("The length of N must be either 1 or ndims")
+        elif np.isscalar(N):
             self._nx = np.array([N]*ndims, dtype=np.int)
+        else:  # I think None and dicts might be what's left
+            raise ValueError("Unrecognized argument type! N should be a "
+                             "scalar or array_like.")
 
         if np.iterable(L):
             if len(L) == 1:
-                self._L = np.array(list(L)*ndims)
+                self._L = np.array(list(L)*ndims, dtype=np.float64)
             elif len(L) == ndims:
-                self._L = np.array(L)
+                self._L = np.array(L, dtype=np.float64)
             else:
-                raise IndexError("The length of L must be either 1 or ndims")
-        else:
-            self._L = np.array([L]*ndims, dtype=np.float)
+                raise ValueError("The length of L must be either 1 or ndims")
+        elif np.isscalar(L):
+            self._L = np.array([L]*ndims, dtype=np.float64)
+        else:  # I think None and dicts might be what's left
+            raise ValueError("Unrecognized argument type! L should be a "
+                             "scalar or array_like.")
 
         if decomp is None:
             self._decomp = 1
         elif decomp in [1, 2, 3] and decomp <= ndims:
             self._decomp = decomp
         else:
-            raise IndexError("decomp must be 1, 2, 3 or None")
+            raise ValueError("decomp must be 1, 2, 3 or None")
 
         if periodic is None:
             self._periodic = tuple([False]*ndims)
-        elif len(periodic) == ndims:
-            self._periodic = tuple(periodic)
+        elif np.iterable(periodic):
+            if len(periodic) == ndims:
+                self._periodic = tuple(periodic)
+            elif len(periodic) == 1:
+                self._periodic = ndims*tuple(periodic)
+            else:
+                raise ValueError("The length of periodic must be either 1 "
+                                 "or ndims")
+        elif np.isscalar(periodic):
+            self._periodic = ndims*(periodic, )
         else:
-            raise IndexError("Either len(periodic) must be ndims or "
-                             "periodic must be None")
+            raise ValueError("Unrecognized argument type! Periodic should "
+                             "be None, a scalar, or array_like")
 
         if method == 'central_diff':
             self.deriv = self._centdiff_deriv
-        elif method == 'spline_flux_diff':
-            self.deriv = self._akima_deriv
+        elif method == 'akima_flux_diff':
+            self.deriv = self._akima_slab_deriv
         elif method == 'ignore':
             self.deriv = None
         else:
@@ -206,10 +257,9 @@ class _baseAnalyzer(object):
                 print("mpiAnalyzer._baseAnalyzer.__init__(): "
                       "'method' argument not recognized!\n"
                       "Defaulting to Akima spline flux differencing.")
-            self.deriv = self._akima_deriv
+            self.deriv = self._akima_slab_deriv
 
         self._dx = self._L/self._nx
-        self._Nx = self._nx.prod()
 
         # --------------------------------------------------------------
         # MPI domain decomposition
@@ -226,8 +276,8 @@ class _baseAnalyzer(object):
         # --------------------------------------------------------------
         # other stuff (DO NOT count on these being permanent!)
         self.tol = 1.0e-6
-        self.prefix = pid+'-'
-        self.moments_file = '%s%s.moments' % (self.odir, self.prefix)
+        self.prefix = pid
+        self.moments_file = '%s/%s.moments' % (self.odir, self.prefix)
 
     # -------------------------------------------------------------------------
     # Class Properities
@@ -277,10 +327,6 @@ class _baseAnalyzer(object):
         return self._dx
 
     @property
-    def Nx(self):
-        return self._Nx
-
-    @property
     def nnx(self):
         return self._nnx
 
@@ -298,44 +344,44 @@ class _baseAnalyzer(object):
     def psum(self, data):
         return tcstats.psum(data)
 
-    def central_moments(self, data, w=None, wbar=None, m1=None, norm=1.0):
+    def central_moments(self, data, w=None, wbar=None, m1=None):
         """
         Computes global min, max, and 1st to 6th biased central moments of
         assigned spatial field. To get raw moments, simply pass in m1=0.
         """
-        return tcstats.central_moments(
-                                self.comm, self.Nx*norm, data, w, wbar, m1)
+        return tcstats.central_moments(data, w, wbar, m1, self.comm)
 
-    def write_moments(self, data, label, w=None, wbar=None, m1=None, norm=1.0):
-        """Compute min, max, mean, and 2nd-6th (biased) central
+    def write_moments(self, data, label, w=None, wbar=None, m1=None):
+        """Compute min, max, mean, and 2nd-6th central
         moments for assigned spatial field"""
-        m1, c2, c3, c4, gmin, gmax = tcstats.central_moments(
-                            self.comm, self.Nx*norm, data, w, wbar, m1)
+        m = tcstats.central_moments(data, w, wbar, m1, self.comm)
 
         if self.comm.rank == 0:
             with open(self.moments_file, 'a') as fh:
-                fh.write(('{:s}\t%s\n' % '  '.join(['{:14.8e}']*6))
-                         .format(label, m1, c2, c3, c4, gmin, gmax))
+                fmt = ('{:40s}  %s\n' % '  '.join(['{:14.8e}']*len(m))).format
+                fh.write(fmt(label, *m))
 
-        return m1, c2, c3, c4, gmin, gmax
+        return m
 
-    def mean(self, data, w=None, wbar=None, norm=1.0):
-        N = self.Nx*norm
+    def mean(self, data, w=None, wbar=None):
+        N = data.size
+
         if w is None:
-            u1 = self.comm.allreduce(self.psum(data), op=MPI.SUM)/N
+            m1 = self.comm.allreduce(self.psum(data), op=MPI.SUM)/N
         else:
             if wbar is None:
                 wbar = self.comm.allreduce(self.psum(w), op=MPI.SUM)/N
             N *= wbar
-            u1 = self.comm.allreduce(self.psum(w*data), op=MPI.SUM)/N
+            m1 = self.comm.allreduce(self.psum(w*data), op=MPI.SUM)/N
 
-        return u1
+        return m1
 
-    def rms(self, data, w=None, wbar=None, norm=1.0):
+    def rms(self, data, w=None, wbar=None):
         """
         Spatial root-mean-square (RMS)
         """
-        N = self.Nx*norm
+        N = data.size
+
         if w is None:
             m2 = self.comm.allreduce(self.psum(data**2), op=MPI.SUM)/N
         else:
@@ -344,7 +390,7 @@ class _baseAnalyzer(object):
             N *= wbar
             m2 = self.comm.allreduce(self.psum(w*data**2), op=MPI.SUM)/N
 
-        return np.sqrt(m2)
+        return m2**0.5
 
     def min_max(self, data):
         gmin = self.comm.allreduce(data.min(), op=MPI.MIN)
@@ -355,56 +401,213 @@ class _baseAnalyzer(object):
     # -------------------------------------------------------------------------
     # Histograms
     # -------------------------------------------------------------------------
-    def histogram1(self, var, fname, metadata='', range=None, bins=100,
-                   w=None, wbar=None, m1=None, norm=1.0):
+    def histogram1(self, var, fname, header='#', range=None, bins=100, w=None):
         """MPI-distributed univariate spatial histogram."""
 
-        # get histogram and statistical moments (every task gets the results)
-        # result = (hist, u1, c2, g3, g4, g5, g6, gmin, gmax, width)
-        results = tcstats.histogram1(self.comm, self.Nx*norm,
-                                     var, range, bins, w, wbar, m1)
-        hist = results[0]
-        gmin, gmax, width = results[-3:]
-        m = results[1:-3]
+        results = tcstats.histogram1(var, bins, range, w, self.comm)
+        hist, lhist, bins, gmin, gmax = results
 
         # write histogram from root task
         if self.comm.rank == 0:
-            fh = open('%s%s%s.hist' % (self.odir, self.prefix, fname), 'w')
-            fh.write('%s\n' % metadata)
-            fmt = ('%s\n' % '  '.join(['{:14.8e}']*len(m))).format
-            fh.write(fmt(*m))
-            fmt = ('{:d}  %s\n' % '  '.join(['{:14.8e}']*3)).format
-            fh.write(fmt(bins, width, gmin, gmax))
+            fh = open('%s/%s-%s.hist' % (self.odir, self.prefix, fname), 'w')
+            fh.write('%s\n' % header)
+            fh.write('%d  %14.8e  %14.8e\n' % (bins, gmin, gmax))
             hist.tofile(fh, sep='\n', format='%14.8e')
             fh.close()
 
-        return m
+        return hist, gmin, gmax, lhist
 
-    def histogram2(self, var1, var2, fname, metadata='',
-                   xrange=None, yrange=None, bins=100, w=None):
+    def histogram2(self, var1, var2, fname, header='#', range=None, bins=100,
+                   w=None):
         """MPI-distributed bivariate spatial histogram."""
 
-        # get histogram and statistical moments (every task gets the results)
-        # result = (jhist, (min1, max1), width1, (min2, max2), width2)
         if w is not None:
             w = np.ravel(w)
 
-        result = tcstats.histogram2(
-                    self.comm, np.ravel(var1), np.ravel(var2),
-                    xrange, yrange, bins, w)
-        hist = result[0]
-        m = result[1:]
+        var1, var2 = np.ravel(var1), np.ravel(var2)
+
+        hist, lhist, bins1, bins2, range = tcstats.histogram2(
+                                    var1, var2, range, bins, w, self.comm)
 
         # write histogram from root task
         if self.comm.rank == 0:
-            fmt = ('%d  %s\n' % '  '.join(['{:14.8e}']*len(m))).format
-            fh = open('%s%s%s.hist2d' % (self.odir, self.prefix, fname), 'w')
-            fh.write('%s\n' % metadata)
-            fh.write(fmt(bins, *m))
-            hist.tofile(fh, sep='\n', format='%14.8e')
-            fh.close()
+            save_file = '%s/%s.npz' % (self.odir, fname)
+            np.savez(save_file, hist=hist, xy_range=range,
+                     xbins=bins1, ybins=bins2, meta=header)
 
-        return m
+        return hist, range, lhist
+
+    def conditional_mean(self, var, cond, fname, header=None,
+                         bins=100, range=None, counts=None):
+        """Computes the MPI-distributed mean of `var` conditional on
+        the binned values of `cond`.
+
+        This is an MPI-distributed equivalent to calling
+        `scipy.stats.binned_static(cond, var, 'mean', bins, range)`.
+
+        Parameters
+        ----------
+        var : MPI-distributed ndarray
+            [description]
+        cond : MPI-distributed ndarray
+            [description]
+        fname : string
+            [description]
+        header : string
+            [description]
+        bins : sequence or int, optional
+            An array_like sequence describing the bin edges or an integer
+            value describing the number of bins between the lower and upper
+            range values (the default is 100).
+        range : sequence, optional
+            A sequence of lower and upper bin edges to be used if the edges
+            are not given explicitly in `bins`. The default is to use the
+            MPI-reduced minimum and maximum values of `cond`.
+        counts : [N+2,]-shaped ndarray, optional
+            (All ranks) the MPI-reduced histogram of `cond`, including
+            outlier bins, generated, for instance, by a previous invocation
+            of `conditional_mean`. If present, assumes `cond` is properly
+            digitized, as if it were the `binned_cond` result of a previous
+            invocation of `conditional_mean`.
+
+        Returns
+        -------
+        cond_mean : [N,]-shaped ndarray
+            (All ranks) ndarray of MPI-reduced conditional means of
+            `var` with length N equal to the number of bins used to
+            digitize `cond`.
+        binned_cond : MPI-distribued ndarray
+            (local to rank) digitized (with rightmost-edge correction)
+            `cond` array.
+        counts : [N+2,]-shaped ndarray
+            (All ranks) MPI-reduced histogram of `cond`, including
+            outlier bins.
+        outliers : (2, )-shaped tuple
+            (All ranks) MPI-reduced mean of `var` conditioned on low
+            and high value of `cond` outside of the provided `bin` edge
+            sequence or `range`.
+        """
+        if header is None:
+            header = 'NOTE: data includes outlier bins.\n# cols: sums, counts'
+
+        if counts is None:
+            results = tcstats.conditional_mean(var, cond, bins, range,
+                                               self.comm)
+            cond_mean, binned_cond, counts, outliers = results
+            binsum = np.r_[outliers[0], cond_mean, outliers[1]] * counts
+
+            if np.isscalar(bins):
+                nbin = bins
+            else:
+                nbin = len(bins) - 1
+
+        else:
+            # taken straight from tcstats.conditional_mean
+            binned_cond = cond
+            valid = counts.nonzero()
+            nbin = counts.size
+
+            binsum = np.bincount(binned_cond.ravel(), var.ravel(),
+                                 minlength=nbin)
+            self.comm.Allreduce(MPI.IN_PLACE, binsum, op=MPI.SUM)
+
+            cond_mean = np.zeros(nbin, float)
+            cond_mean.fill(np.nan)
+            cond_mean[valid] = binsum[valid]/counts[valid]
+            outliers = (cond_mean[0], cond_mean[-1])
+            cond_mean = cond_mean[1:-1]
+
+        if range is None:
+            cmin = self.comm.allreduce(cond.min(), op=MPI.MIN)
+            cmax = self.comm.allreduce(cond.max(), op=MPI.MAX)
+        else:
+            cmin, cmax = range
+
+        # write conditional means to file from root task
+        if (self.comm.rank == 0) and fname:
+            with open(fname, 'w') as fh:
+                fh.write('# %s\n' % header)
+                fh.write('# %d %-14.8e %-14.8e\n' % (nbin, cmin, cmax))
+                cols = np.zeros(counts.size, dtype=[
+                                ('col1', np.float64), ('col2', np.int64)])
+                cols['col1'] = binsum
+                cols['col2'] = counts
+                columns = np.stack((binsum, counts), axis=-1)
+                np.savetxt(fh, columns, fmt='%-15.8e %-15d')
+
+        return cond_mean, binned_cond, counts, outliers
+
+    # -------------------------------------------------------------------------
+    # Scalar and Vector Derivatives
+    # -------------------------------------------------------------------------
+    def div(self, var):
+        """
+        Calculate and return the divergence of a vector field.
+
+        Currently the slab_exchange routines limit this function to vector
+        fields.
+        """
+        div = self.deriv(var[0], dim=0)   # axis=2
+        div+= self.deriv(var[1], dim=1)   # axis=1
+        div+= self.deriv(var[2], dim=2)   # axis=0
+        return div
+
+    def curl(self, var):
+        """
+        Calculate and return the curl of a vector field.
+        """
+        assert var.ndim == 4, "ERROR: var must be a vector field!"
+
+        temp = self.deriv(var[1], dim=2)
+        omega = np.empty((3, *temp.shape), dtype=var.dtype)
+
+        omega[0] = temp - self.deriv(var[2], dim=1)
+        omega[1] = self.deriv(var[2], dim=0) - self.deriv(var[0], dim=2)
+        omega[2] = self.deriv(var[0], dim=1) - self.deriv(var[1], dim=0)
+
+        return omega
+
+    def scl_grad(self, var):
+        """
+        Calculate and return the gradient vector field of a scalar field.
+        """
+        temp = self.deriv(var, dim=0)
+        grad = np.empty((3, *temp.shape), dtype=var.dtype)
+
+        grad[0] = temp
+        grad[1] = self.deriv(var, dim=1)
+        grad[2] = self.deriv(var, dim=2)
+
+        return grad
+
+    def grad(self, var):
+        """
+        Calculate and return the gradient tensor field of a vector field.
+        """
+        temp = self.deriv(var[0], dim=0)
+        A = np.empty((3, 3, *temp.shape), dtype=var.dtype)
+
+        for j in range(3):
+            for i in range(3):
+                A[j, i] = self.deriv(var[i], dim=j)
+
+        return A
+
+    def grad_curl_div(self, u):
+        """
+        Uses numpy.einsum which can be dramatically faster than
+        alternative routines for many use cases
+        """
+        A = self.grad(u)
+
+        e = np.zeros((3, 3, 3))
+        e[0, 1, 2] = e[1, 2, 0] = e[2, 0, 1] = 1
+        e[0, 2, 1] = e[2, 1, 0] = e[1, 0, 2] = -1
+        omega = np.einsum('ijk,jk...->i...', e, A)
+
+        Aii = np.einsum('ii...', A)
+
+        return A, omega, Aii
 
     # -------------------------------------------------------------------------
     # Data Communication
@@ -512,94 +715,6 @@ class _baseAnalyzer(object):
         return temp1
 
     # -------------------------------------------------------------------------
-    # Scalar and Vector Derivatives
-    # -------------------------------------------------------------------------
-    def div(self, var):
-        """
-        Calculate and return the divergence of a vector field.
-
-        Currently the slab_exchange routines limit this function to vector
-        fields.
-        """
-        div = self.deriv(var[0], dim=0)   # axis=2
-        div+= self.deriv(var[1], dim=1)   # axis=1
-        div+= self.deriv(var[2], dim=2)   # axis=0
-        return div
-
-    def curl(self, var):
-        """
-        Calculate and return the curl of a vector field.
-        """
-
-        if var.ndim == 5:   # var is the gradient tensor field
-            e = np.zeros((3, 3, 3))
-            e[0, 1, 2] = e[1, 2, 0] = e[2, 0, 1] = 1
-            e[0, 2, 1] = e[2, 1, 0] = e[1, 0, 2] = -1
-            omega = np.einsum('ijk,jk...->i...', e, var)
-
-        elif var.ndim == 4:     # var is the vector field
-            omega = np.empty_like(var)
-            omega[0] = self.deriv(var[1], dim=2)
-            omega[0]-= self.deriv(var[2], dim=1)
-
-            omega[1] = self.deriv(var[2], dim=0)
-            omega[1]-= self.deriv(var[0], dim=2)
-
-            omega[2] = self.deriv(var[0], dim=1)
-            omega[2]-= self.deriv(var[1], dim=0)
-        else:
-            raise
-
-        return omega
-
-    def scl_grad(self, var):
-        """
-        Calculate and return the gradient vector field of a scalar field.
-        """
-
-        shape = list(var.shape)
-        shape.insert(0, 3)
-        grad = np.empty(shape, dtype=var.dtype)
-
-        grad[0] = self.deriv(var, dim=0)
-        grad[1] = self.deriv(var, dim=1)
-        grad[2] = self.deriv(var, dim=2)
-
-        return grad
-
-    def grad(self, var):
-        """
-        Calculate and return the gradient tensor field of a vector field.
-        """
-
-        shape = list(var.shape)
-        shape.insert(0, 3)
-        A = np.empty(shape, dtype=var.dtype)
-
-        for j in range(3):
-            for i in range(3):
-                A[j, i] = self.deriv(var[i], dim=j)
-
-        return A
-
-    def grad_curl_div(self, u):
-        """
-        Uses numpy.einsum which can be dramatically faster than
-        alternative routines for many use cases
-        """
-
-        A = self.grad(u)
-
-        e = np.zeros((3, 3, 3))
-        e[0, 1, 2] = e[1, 2, 0] = e[2, 0, 1] = 1
-        e[0, 2, 1] = e[2, 1, 0] = e[1, 0, 2] = -1
-        omega = np.einsum('ijk,jk...->i...', e, A)
-
-        Aii = np.einsum('ii...', A)
-
-        return A, omega, Aii
-
-    # -------------------------------------------------------------------------
     # Underlying Differential Operator Methods
     # -------------------------------------------------------------------------
     def _centdiff_deriv(self, var, dim=0, k=1):
@@ -610,7 +725,7 @@ class _baseAnalyzer(object):
         finite difference module, central_deriv may not honor a request for
         anything but the first derivative, depending on it's state of
         development.
-        """
+
         dim = dim % 3
         axis = 2-dim
         if axis == 0:
@@ -622,6 +737,8 @@ class _baseAnalyzer(object):
             deriv = self.y2z_slab_exchange(deriv)
 
         return deriv
+        """
+        pass
 
     def _akima_deriv(self, var, dim=0, k=1):
         """
@@ -633,30 +750,38 @@ class _baseAnalyzer(object):
         if axis == 0:
             var = self.z2y_slab_exchange(var)
 
-        deriv = tcas.deriv(var, self.dx[axis], axis=axis)
+        deriv = tcas._deriv(var, self.dx[axis], axis=axis)
 
         if axis == 0:
             deriv = self.y2z_slab_exchange(deriv)
 
         return deriv
 
-    def _fft_deriv(self, var, dim=0, k=1):
+    def _akima_slab_deriv(self, var, dim=0, k=1, ng=3, valid_ghosts=False):
         """
-        Calculate and return the specified derivative of a 3D scalar field.
-        This function uses 1D FFTs and MPI-decomposed transposing instead of
-        MPI-decomposed 3D FFTs.
+        Calculate and return the _first_ derivative of a 3D scalar field.
+        The k parameter is ignored, a first derivative is _always_ returned.
         """
         dim = dim % 3
         axis = 2-dim
-        s = [1]*var.ndim
-        s[axis] = self.k1.shape[0]
-        K = self.k1.reshape(s)
 
         if axis == 0:
             var = self.z2y_slab_exchange(var)
 
-        deriv = np.fft.irfft(
-                    np.power(1j*K, k)*np.fft.rfft(var, axis=axis), axis=axis)
+        if not valid_ghosts:
+            axes = (axis, (axis+1) % 3, (axis+2) % 3)
+            shape = list(var.shape)
+            shape[axis] += 2*ng
+            temp = np.empty(shape, dtype=var.dtype)
+            tempT = temp.transpose(axes)  # new _view_ into the inputs
+            varT = var.transpose(axes)    # new _view_ into the inputs
+            assert np.may_share_memory(temp, tempT)
+            tempT[3:-3] = varT
+            tempT[:3] = varT[-6:-3]
+            tempT[-3:] = varT[3:6]
+            var = temp
+
+        deriv = tcas.flux_diff(var, dx=self.dx[axis], axis=axis, ng=3)
 
         if axis == 0:
             deriv = self.y2z_slab_exchange(deriv)
@@ -674,44 +799,47 @@ class _hitAnalyzer(_baseAnalyzer):
     # -------------------------------------------------------------------------
     # Class Instantiator
     # -------------------------------------------------------------------------
-    def __init__(self, comm, odir, pid, ndims, L, N, method):
+    def __init__(self, comm, odir, pid, ndims, decomp, L, N, method):
 
-        super().__init__(comm, odir, pid, ndims, L, N, 'ignore')
+        periodic = [True]*ndims
+        super().__init__(comm, odir, pid, ndims, decomp, periodic, L, N,
+                         'ignore')
 
         self._config = "Homogeneous Isotropic Turbulence"
-        self._periodic = [True]*ndims
 
-        # Spectral variables (1D Decomposition)
-        self.nk = self.nx.copy()
-        self.nk[-1] = self.nx[-1]//2+1
-        self.nnk = self.nk.copy()
-        self.nnk[1] = self.nnx[0]
-        self.dk = 1.0/self.L[0]
+        if self._decomp == 1 and ndims == 3:
+            # Spectral variables (1D Decomposition, 3D field)
+            self.nk = self.nx.copy()
+            self.nk[2] = self.nx[2]//2+1
+            self.nnk = self.nk.copy()
+            self.nnk[1] = self.nnx[0]
+            self.dk = 2*np.pi/self.L[2]
+            dk = self.dk
 
-        nx = self.nx[-1]
-        dk = self.dk
+            nny = self.nx[1]//comm.size
+            iys = nny*comm.rank
+            iye = iys+nny
 
-        # The teslacu.fft.rfft3 and teslacu.fft.irfft3 functions currently
-        # transpose Z and Y in the forward fft (rfft3) and inverse the
-        # tranpose in the inverse fft (irfft3).
-        # These FFT routines and these variables below assume that ndims=3
-        # which ruins the generality I so carefully crafted in the base class
-        k1 = np.fft.rfftfreq(self.nx[2])*dk*nx
-        k2 = np.fft.fftfreq(self.nx[1])*dk*nx
-        k2 = k2[self.ixs[0]:self.ixe[0]].copy()
-        k3 = np.fft.fftfreq(self.nx[0])*dk*nx
+            # The teslacu.fft.rfft3 and teslacu.fft.irfft3 functions currently
+            # transpose Z and Y in the forward fft (rfft3) and inverse the
+            # tranpose in the inverse fft (irfft3).
+            # These FFT routines and these variables below assume that ndims=3
+            # which ruins the generality I so carefully crafted in the base class
+            k2 = np.fft.rfftfreq(self.nx[2])*dk*self.nx[2]
+            k1 = np.fft.fftfreq(self.nx[1])*dk*self.nx[1]
+            k1 = k1[iys:iye].copy()
+            k0 = np.fft.fftfreq(self.nx[0])*dk*self.nx[0]
 
-        # MPI local 3D wavemode index
-        self.K = np.array(np.meshgrid(k3, k2, k1, indexing='ij'))
-        self.Ksq = np.sum(np.square(self.K), axis=0)
-        self.k = np.sqrt(self.Ksq)
-        self.km = (self.k//dk).astype(int)
-        self.k1 = k1
+            # MPI local 3D wavemode index
+            self.Kvec = np.array(np.meshgrid(k0, k1, k2, indexing='ij'))
+            self.Kmag = np.sqrt(np.sum(np.square(self.Kvec), axis=0))
+            self.Kmode = (self.Kmag//dk).astype(int)
+            self.k = k2
 
-        if method == 'central_diff':
+        if method == 'akima_flux_diff':
+            self.deriv = self._akima_slab_deriv
+        elif method == 'central_diff':
             self.deriv = self._centdiff_deriv
-        elif method == 'spline_flux_diff':
-            self.deriv = self._akima_deriv
         elif method == 'spectral':
             self.deriv = self._fft_deriv
         else:
@@ -719,7 +847,7 @@ class _hitAnalyzer(_baseAnalyzer):
                 print("mpiAnalyzer._hitAnalyzer.__init__(): "
                       "'method' argument not recognized!\n"
                       "Defaulting to Akima spline flux differencing.")
-            self.deriv = self._akima_deriv
+            self.deriv = self._akima_slab_deriv
 
     # -------------------------------------------------------------------------
     # Power Spectral Density Analysis
@@ -730,6 +858,8 @@ class _hitAnalyzer(_baseAnalyzer):
         assumes a real input is in physical space and a complex input is
         in Fourier space.
         """
+        assert self._decomp == 1, "ERROR decomp not 1D"
+
         if np.iscomplexobj(var) is True:
             cdata = var
         else:
@@ -747,10 +877,11 @@ class _hitAnalyzer(_baseAnalyzer):
             spect3d = np.sum(spect3d, axis=0)
         spect3d[..., 0] *= 0.5
 
-        spect1d = tcfft.shell_average(self.comm, spect3d, self.km)
+        spect1d = tcfft.shell_average(self.comm, spect3d, self.Kmode)
 
         if self.comm.rank == 0:
-            fh = open('%s%s%s.spectra' % (self.odir, self.prefix, fname), 'w')
+            fh = open('%s/%s-%s.spectra' % (
+                                    self.odir, self.prefix, fname), 'w')
             fh.write('%s\n' % metadata)
             spect1d.tofile(fh, sep='\n', format='% .8e')
             fh.close()
@@ -764,25 +895,30 @@ class _hitAnalyzer(_baseAnalyzer):
         ell = (pi/2)*(1/u'^2)*Int{Ek/k}
             = 3*pi/4*Int{Ek/k}/Int{Ek}
         """
-        return 0.75*np.pi*self.psum(Ek[1:]/self.k1[1:])/self.psum(Ek[1:])
+        assert self._decomp == 1, "ERROR decomp not 1D"
+
+        return 0.75*np.pi*self.psum(Ek[1:]/self.k[1:])/self.psum(Ek[1:])
 
     def shell_average(self, E3):
         """
         Convenience function for shell averaging
         """
-        return tcfft.shell_average(self.comm, E3, self.km)
+        assert self._decomp == 1, "ERROR decomp not 1D"
 
-    def filter_kernel(self, ell, gtype='comp_exp', dtype=np.complex128):
-        """
-        ell - filter width
-        G - user-supplied filter kernel array
-        """
-        kl = self.k*ell
+        return tcfft.shell_average(self.comm, E3, self.Kmode)
 
-        Ghat = np.zeros(self.k.shape, dtype=dtype)
+    def filter_kernel(self, ell, gtype='gaussian'):
+        """
+        Empty docstring!
+        """
+        assert self._decomp == 1, "ERROR decomp not 1D"
 
         if gtype == 'tophat':
-            Ghat = np.sin(np.pi*kl)/(np.pi*kl**2)
+            # THIS IS WRONG STILL, NOT 3D!!!
+            Ghat = np.sinc(self.Kmag*ell)
+
+        elif gtype == 'gaussian':
+            Ghat = np.exp(-0.5*(np.pi*ell*self.Kmag)**2)
 
         elif gtype == 'comp_exp':
             """
@@ -792,58 +928,101 @@ class _hitAnalyzer(_baseAnalyzer):
             3) is smooth (infinitely differentiable)
             in _both_ physical and spectral space!
             """
-            Hhat = np.exp(-kl**2/(0.25-kl**2))
-            ball = kl <= 0.5
-            Ghat = np.where(ball, Hhat, Ghat)
-            G0 = tcfft.irfft3(self.comm, Ghat)
-            G = G0**2
+            kl = self.Kmag*ell
+            Ghat = np.where(kl <= 0.5, np.exp(-kl**2/(0.25-kl**2)), 0.0)
+            G = tcfft.irfft3(self.comm, Ghat.astype(np.complex128))
+            G = G**2
             Gbar = self.comm.allreduce(self.psum(G), op=MPI.SUM)
-            G = G/Gbar
+            G *= 1.0/Gbar
             Ghat = tcfft.rfft3(self.comm, G)
 
         elif gtype == 'spectral':
-            Ghat = (kl < 1.0).astype(dtype)
+            Ghat = np.where(self.Kmag*ell < 1.0, 1.0, 0.0)
 
         else:
             raise ValueError('did not understand filter type')
 
-        # elif gtype == 'inv_comp_exp':
-        #     H = np.exp(-kl**2/(0.25-kl**2))
-        #     ball = (kl <= 0.5).astype(np.int8)
-        #     Ghat[ball] = Hhat[ball]
-        #     G0 = tcfft.irfft3(self.comm, Ghat)
-        #     G = G0**2
-        #     Gbar = self.comm.allreduce(self.psum(G), op=MPI.SUM)
-        #     G = G/Gbar
-        #     Ghat = tcfft.rfft3(self.comm, G)
-
         return Ghat
 
     def scalar_filter(self, phi, Ghat):
+        """Filter scalar field with a Fourier-domain transfer function.
+
+        Assumes `phi` is a 3D scalar spatial field with 1D domain
+        decomposition. `phi` is transformed to Fourier-domain, multiplied
+        by `Ghat`, then inverse transformed back to spatial domain.
+
+        Parameters
+        ----------
+        phi : {[M//nprocs, N, P]-shaped array_like}
+            3D spatial field to be filtered.
+        Ghat : {[M, N//nprocs, P//2+1]-shaped array_like}
+            3D Fourier-domain filter transfer function.
+
+        Returns
+        -------
+        [M//nprocs, N, P]-shaped ndarray
+            Filtered scalar field.
+        """
+        assert self._decomp == 1, "ERROR decomp not 1D"
+
         return tcfft.irfft3(self.comm, Ghat*tcfft.rfft3(self.comm, phi))
 
     def vector_filter(self, u, Ghat):
+        assert self._decomp == 1, "ERROR decomp not 1D"
+
         return self.vec_ifft(Ghat*self.vec_fft(u))
 
     # -------------------------------------------------------------------------
     # FFT Wrapper Methods
     # -------------------------------------------------------------------------
+
+    def _fft_deriv(self, var, dim=0, k=1):
+        """
+        Calculate and return the specified derivative of a 3D scalar field.
+        This function uses 1D FFTs and MPI-decomposed transposing instead of
+        MPI-decomposed 3D FFTs.
+        """
+        assert self._decomp == 1, "ERROR decomp not 1D"
+
+        dim = dim % 3
+        axis = 2-dim
+        s = [1]*var.ndim
+        s[axis] = self.k.shape[0]
+        K = self.k.reshape(s)
+
+        if axis == 0:
+            var = self.z2y_slab_exchange(var)
+
+        deriv = np.fft.irfft(
+                    np.power(1j*K, k)*np.fft.rfft(var, axis=axis), axis=axis)
+
+        if axis == 0:
+            deriv = self.y2z_slab_exchange(deriv)
+
+        return deriv
+
     def scl_fft(self, var):
         """
         Convenience function for MPI-distributed 3D r2c FFT of scalar.
         """
+        assert self._decomp == 1, "ERROR decomp not 1D"
+
         return tcfft.rfft3(self.comm, var)
 
     def scl_ifft(self, var):
         """
         Convenience function for MPI-distributed 3D c2r IFFT of scalar.
         """
+        assert self._decomp == 1, "ERROR decomp not 1D"
+
         return tcfft.irfft3(self.comm, var)
 
     def vec_fft(self, var):
         """
         Convenience function for MPI-distributed 3D r2c FFT of vector.
         """
+        assert self._decomp == 1, "ERROR decomp not 1D"
+
         nnz, ny, nx = var.shape[1:]
         nk = nx//2+1
         nny = ny//self.comm.size
@@ -867,6 +1046,8 @@ class _hitAnalyzer(_baseAnalyzer):
         """
         Convenience function for MPI-distributed 3D c2r IFFT of vector.
         """
+        assert self._decomp == 1, "ERROR decomp not 1D"
+
         nz, nny, nk = fvar.shape[1:]
         nx = (nk-1)*2
         ny = nny*self.comm.size
@@ -885,3 +1066,64 @@ class _hitAnalyzer(_baseAnalyzer):
         var[2] = tcfft.irfft3(self.comm, fvar[2])
 
         return var
+
+    def half_reflect_periodization(self, var, izs=None):
+        """Shift and reflect half of scalar volume in z-direction.
+
+        MPI-transpose a 3D scalar volume with 1D domain decomposition
+        then take center half (nz//4:3*nz//4), shift (to 0:nz//2), and
+        reflect along z-direction (varT[:nz//2] == varT[nz//2::-1])
+
+        Parameters
+        ----------
+        var : MPI-distributed ndarray
+            MPI-decomposed 3D scalar volume (1D domain decomposition)
+
+        Returns
+        -------
+        MPI-distributed ndarray
+            reflected center half-volume
+        """
+        varT = self.z2y_slab_exchange(var)
+        nz, nny, nx = varT.shape
+        nzq = nz//4
+        nzh = nz//2
+        if izs is None:
+            izs = nzq
+
+        temp = np.empty((nzh, nny, nx), dtype=varT.dtype)
+        temp[:] = varT[izs:izs+nzh]
+        varT[:nzh] = temp
+        varT[nzh:] = temp[::-1]
+
+        assert np.all(varT[nzq] == varT[nzq+nzh-1])
+
+        var[:] = self.y2z_slab_exchange(varT)
+
+        return var
+
+    def qtr_truncate_reflected_var(self, var, izs=None):
+        # at the start var is reflected in center, so only half the domain
+        # contains unique information. We want just half of that half.
+        varT = self.z2y_slab_exchange(var)
+
+        nz, nny, nx = varT.shape
+        izs = nz//8
+        ize = izs+nz//4
+
+        return self.y2z_slab_exchange(varT[izs:ize])
+
+    def truncate_along_z(self, var, izs, ize):
+        varT = self.z2y_slab_exchange(var)
+        return self.y2z_slab_exchange(varT[izs:ize])
+
+    def flame_extents(self, Y):
+        YT = self.z2y_slab_exchange(Y)
+
+        zfs = np.min(np.nonzero(YT > 0.001)[0])
+        zfe = np.max(np.nonzero(YT < 0.999)[0])
+
+        zfs = self.comm.allreduce(zfs, op=MPI.MIN)
+        zfe = self.comm.allreduce(zfe, op=MPI.MAX)
+
+        return zfs, zfe
