@@ -816,6 +816,8 @@ class _hitAnalyzer(_baseAnalyzer):
             self.nnk = self.nk.copy()
             self.nnk[1] = self.nnx[0]
             self.dk = 2*np.pi/self.L[2]
+
+            nx = self.nx[-1]
             dk = self.dk
 
             nny = self.nx[1]//comm.size
@@ -828,10 +830,10 @@ class _hitAnalyzer(_baseAnalyzer):
             # These FFT routines and these variables below assume that ndims=3
             # which ruins the generality I so carefully crafted in the base
             # class
-            k2 = np.fft.rfftfreq(self.nx[2])*dk*self.nx[2]
-            k1 = np.fft.fftfreq(self.nx[1])*dk*self.nx[1]
+            k2 = np.fft.rfftfreq(self.nx[2])*dk*nx
+            k1 = np.fft.fftfreq(self.nx[1])*dk*nx
             k1 = k1[iys:iye].copy()
-            k0 = np.fft.fftfreq(self.nx[0])*dk*self.nx[0]
+            k0 = np.fft.fftfreq(self.nx[0])*dk*nx
 
             # MPI local 3D wavemode index
             self.Kvec = np.array(np.meshgrid(k0, k1, k2, indexing='ij'))
