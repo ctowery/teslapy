@@ -131,7 +131,7 @@ def conditional_mean(var, cond, bins=100, range=None, comm=COMM_WORLD):
     cond_mean : [N,]-shaped ndarray
         (All ranks) ndarray of MPI-reduced conditional mean of `var`
         with length N equal to the number of bins used to digitize `cond`.
-    digits : MPI-distribued ndarray
+    binned_cond : MPI-distribued ndarray
         (local to rank) digitized and rightmost-edge-corrected `cond` array.
     counts : [N+2,]-shaped ndarray
         (All ranks) MPI-reduced histogram of `cond`, including outlier bins.
@@ -141,18 +141,20 @@ def conditional_mean(var, cond, bins=100, range=None, comm=COMM_WORLD):
         or `range`.
     """
 
-    # Get the range. Used only if number of bins is given.
-    if range is None:
-        fill = np.ma.minimum_fill_value(cond)
-        cmin = comm.allreduce(np.amin(cond, initial=fill), op=MPI.MIN)
-        cmax = comm.allreduce(np.amax(cond, initial=-fill), op=MPI.MAX)
-    else:
-        cmin, cmax = range
-
     # Create edge arrays
     if np.isscalar(bins):
         nbin = bins + 2
+
+        # Get the range
+        if range is None:
+            fill = np.ma.minimum_fill_value(cond)
+            cmin = comm.allreduce(np.amin(cond, initial=fill), op=MPI.MIN)
+            cmax = comm.allreduce(np.amax(cond, initial=-fill), op=MPI.MAX)
+        else:
+            cmin, cmax = range
+
         edges = np.linspace(cmin, cmax, nbin - 1)
+
     else:
         edges = np.asarray(bins, float)
         nbin = edges.size + 1
@@ -160,7 +162,7 @@ def conditional_mean(var, cond, bins=100, range=None, comm=COMM_WORLD):
     dedges = np.diff(edges)
 
     # Compute the bin number each data point falls into
-    digits = np.digitize(cond, edges)
+    binned_cond = np.digitize(cond, edges)
 
     # Using `digitize`, values that fall on an edge are put in the right
     # bin. For the rightmost bin, we want values equal to the right edge
@@ -171,22 +173,22 @@ def conditional_mean(var, cond, bins=100, range=None, comm=COMM_WORLD):
     on_edge = np.where(np.around(cond, decimal) ==
                        np.around(edges[-1], decimal))
     # -- Shift these points one bin to the left.
-    digits[on_edge] -= 1
-    counts = np.bincount(digits.ravel(), minlength=nbin)
+    binned_cond[on_edge] -= 1
 
+    counts = np.bincount(binned_cond.ravel(), minlength=nbin)
     comm.Allreduce(MPI.IN_PLACE, counts, op=MPI.SUM)
-    valid = counts.nonzero()
-
-    binsum = np.bincount(digits.ravel(), var.ravel(), minlength=nbin)
-    comm.Allreduce(MPI.IN_PLACE, binsum, op=MPI.SUM)
 
     cond_mean = np.empty(nbin, float)
     cond_mean.fill(np.nan)
+    valid = counts.nonzero()
+    binsum = np.bincount(binned_cond.ravel(), var.ravel(), minlength=nbin)
+    comm.Allreduce(MPI.IN_PLACE, binsum, op=MPI.SUM)
     cond_mean[valid] = binsum[valid]/counts[valid]
+
     outliers = (cond_mean[0], cond_mean[-1])
     cond_mean = cond_mean[1:-1]
 
-    return cond_mean, digits, counts, outliers
+    return cond_mean, binned_cond, counts, outliers
 
 
 def histogram1(var, bins=50, range=None, w=None, comm=COMM_WORLD):

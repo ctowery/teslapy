@@ -17,10 +17,10 @@ However, Python and C/C++ are natively row-major index order, i.e.
 [x3, x2, x1], where x1 remains contiguous in memory and x3 remains the
 inhomogenous dimension.
 
-The TESLaCU package adheres to row-major order for indexing data grids and when
-indexing variables associated with the grid dimensions (e.g. nx, ixs, etc.),
-however all vector fields retain standard Einstein notation indexing order,
-(e.g. u[0] == u1, u[1] == u2, u[2] == u3).
+The TESLaCU package adheres to row-major order for indexing data grids and
+when indexing variables associated with the grid dimensions (e.g. nx, ixs,
+etc.), however all vector fields retain standard Einstein notation indexing
+order, (e.g. u[0] == u1, u[1] == u2, u[2] == u3).
 
 Coding Style Guide:
 -------------------
@@ -88,7 +88,8 @@ def mpiAnalyzer(comm=MPI.COMM_WORLD, odir='./analysis/', pid='test',
     comm : {MPI.Comm}, optional
         MPI communicator for the analyzer (the default is MPI.COMM_WORLD)
     odir : {str}, optional
-        [description] (the default is './analysis/', which [default_description])
+        [description] (the default is './analysis/', which
+        [default_description])
     pid : {str}, optional
         [description] (the default is 'test', which [default_description])
     ndims : {number}, optional
@@ -104,7 +105,8 @@ def mpiAnalyzer(comm=MPI.COMM_WORLD, odir='./analysis/', pid='test',
     config : {str}, optional
         [description] (the default is 'hit', which [default_description])
     method : {str}, optional
-        [description] (the default is 'akima_flux_diff', which [default_description])
+        [description] (the default is 'akima_flux_diff', which
+        [default_description])
 
     Returns
     -------
@@ -824,7 +826,8 @@ class _hitAnalyzer(_baseAnalyzer):
             # transpose Z and Y in the forward fft (rfft3) and inverse the
             # tranpose in the inverse fft (irfft3).
             # These FFT routines and these variables below assume that ndims=3
-            # which ruins the generality I so carefully crafted in the base class
+            # which ruins the generality I so carefully crafted in the base
+            # class
             k2 = np.fft.rfftfreq(self.nx[2])*dk*self.nx[2]
             k1 = np.fft.fftfreq(self.nx[1])*dk*self.nx[1]
             k1 = k1[iys:iye].copy()
