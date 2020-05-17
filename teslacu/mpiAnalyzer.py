@@ -817,7 +817,7 @@ class _hitAnalyzer(_baseAnalyzer):
             self.nnk[1] = self.nnx[0]
             self.dk = 2*np.pi/self.L[2]
 
-            nx = self.nx[-1]
+            nx = self.nx[2]
             dk = self.dk
 
             nny = self.nx[1]//comm.size
