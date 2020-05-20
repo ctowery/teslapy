@@ -814,15 +814,15 @@ class _hitAnalyzer(_baseAnalyzer):
             self.nk = self.nx.copy()
             self.nk[2] = self.nx[2]//2+1
             self.nnk = self.nk.copy()
-            self.nnk[1] = self.nnx[0]
+            self.nnk[1] = self.nk[1]//comm.size
             self.dk = 2*np.pi/self.L[2]
 
             nx = self.nx[2]
             dk = self.dk
 
-            nny = self.nx[1]//comm.size
+            nny = self.nnk[1]
             iys = nny*comm.rank
-            iye = iys+nny
+            iye = iys + nny
 
             # The teslacu.fft.rfft3 and teslacu.fft.irfft3 functions currently
             # transpose Z and Y in the forward fft (rfft3) and inverse the
@@ -830,10 +830,10 @@ class _hitAnalyzer(_baseAnalyzer):
             # These FFT routines and these variables below assume that ndims=3
             # which ruins the generality I so carefully crafted in the base
             # class
-            k2 = np.fft.rfftfreq(self.nx[2])*dk*nx
-            k1 = np.fft.fftfreq(self.nx[1])*dk*nx
+            k2 = np.fft.rfftfreq(self.nx[2])*nx * dk
+            k1 = np.fft.fftfreq(self.nx[1])*nx * dk
             k1 = k1[iys:iye].copy()
-            k0 = np.fft.fftfreq(self.nx[0])*dk*nx
+            k0 = np.fft.fftfreq(self.nx[0])*nx * dk
 
             # MPI local 3D wavemode index
             self.Kvec = np.array(np.meshgrid(k0, k1, k2, indexing='ij'))
