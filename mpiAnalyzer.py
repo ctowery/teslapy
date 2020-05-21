@@ -833,10 +833,9 @@ class _hitAnalyzer(_baseAnalyzer):
             k0 = np.fft.fftfreq(self.nx[0])*self.nx[0] * self.dk[0]
 
             # MPI local 3D wavemode index
-            self.Kvec = np.array(np.meshgrid(k0, k1, k2, indexing='ij'))
-            self.Kmag = np.sqrt(np.sum(np.square(self.Kvec), axis=0))
-            self.Kmode = (self.Kmag//self.dk.min()).astype(int)
-            self.k = k2
+            self.k = (k0, k1, k2)
+            Kvec = np.array(np.meshgrid(k0, k1, k2, indexing='ij'))
+            self.Kmag = np.sqrt(np.sum(np.square(Kvec), axis=0))
 
         if method == 'akima_flux_diff':
             self.deriv = self._akima_slab_deriv
@@ -879,7 +878,8 @@ class _hitAnalyzer(_baseAnalyzer):
             spect3d = np.sum(spect3d, axis=0)
         spect3d[..., 0] *= 0.5
 
-        spect1d = tcfft.shell_average(self.comm, spect3d, self.Kmode)
+        Kmode = (self.Kmag//self.dk.min()).astype(int)
+        spect1d = tcfft.shell_average(self.comm, spect3d, Kmode)
 
         if self.comm.rank == 0:
             fh = open('%s/%s-%s.spectra' % (
@@ -907,7 +907,8 @@ class _hitAnalyzer(_baseAnalyzer):
         """
         assert self._decomp == 1, "ERROR decomp not 1D"
 
-        return tcfft.shell_average(self.comm, E3, self.Kmode)
+        Kmode = (self.Kmag//self.dk.min()).astype(int)
+        return tcfft.shell_average(self.comm, E3, Kmode)
 
     def filter_kernel(self, ell, gtype='gaussian'):
         """
