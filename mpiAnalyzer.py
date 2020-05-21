@@ -809,36 +809,33 @@ class _hitAnalyzer(_baseAnalyzer):
 
         self._config = "Homogeneous Isotropic Turbulence"
 
+        # The teslacu.fft.rfft3 and teslacu.fft.irfft3 functions currently
+        # transpose Z and Y in the forward fft (rfft3) and inverse the
+        # tranpose in the inverse fft (irfft3).
+        # These FFT routines and these variables below assume that ndims=3
+        # which ruins the generality I so carefully crafted in the base
+        # class
         if self._decomp == 1 and ndims == 3:
             # Spectral variables (1D Decomposition, 3D field)
             self.nk = self.nx.copy()
             self.nk[2] = self.nx[2]//2+1
             self.nnk = self.nk.copy()
             self.nnk[1] = self.nk[1]//comm.size
-            self.dk = 2*np.pi/self.L[2]
-
-            nx = self.nx[2]
-            dk = self.dk
+            self.dk = 1.0/self.L
 
             nny = self.nnk[1]
             iys = nny*comm.rank
             iye = iys + nny
 
-            # The teslacu.fft.rfft3 and teslacu.fft.irfft3 functions currently
-            # transpose Z and Y in the forward fft (rfft3) and inverse the
-            # tranpose in the inverse fft (irfft3).
-            # These FFT routines and these variables below assume that ndims=3
-            # which ruins the generality I so carefully crafted in the base
-            # class
-            k2 = np.fft.rfftfreq(self.nx[2])*nx * dk
-            k1 = np.fft.fftfreq(self.nx[1])*nx * dk
+            k2 = np.fft.rfftfreq(self.nx[2])*self.nx[2] * self.dk[2]
+            k1 = np.fft.fftfreq(self.nx[1])*self.nx[1] * self.dk[1]
             k1 = k1[iys:iye].copy()
-            k0 = np.fft.fftfreq(self.nx[0])*nx * dk
+            k0 = np.fft.fftfreq(self.nx[0])*self.nx[0] * self.dk[0]
 
             # MPI local 3D wavemode index
             self.Kvec = np.array(np.meshgrid(k0, k1, k2, indexing='ij'))
             self.Kmag = np.sqrt(np.sum(np.square(self.Kvec), axis=0))
-            self.Kmode = (self.Kmag//dk).astype(int)
+            self.Kmode = (self.Kmag//self.dk.min()).astype(int)
             self.k = k2
 
         if method == 'akima_flux_diff':
@@ -923,7 +920,7 @@ class _hitAnalyzer(_baseAnalyzer):
             Ghat = np.sinc(self.Kmag*ell)
 
         elif gtype == 'gaussian':
-            Ghat = np.exp(-0.5*(np.pi*ell*self.Kmag)**2)
+            Ghat = np.exp(-(1/6)*(ell*self.Kmag)**2)
 
         elif gtype == 'comp_exp':
             """
@@ -980,13 +977,15 @@ class _hitAnalyzer(_baseAnalyzer):
     # -------------------------------------------------------------------------
     # FFT Wrapper Methods
     # -------------------------------------------------------------------------
-
     def _fft_deriv(self, var, dim=0, k=1):
         """
         Calculate and return the specified derivative of a 3D scalar field.
         This function uses 1D FFTs and MPI-decomposed transposing instead of
         MPI-decomposed 3D FFTs.
         """
+        assert False, "TODO: fix for unitary ordinary frequency " \
+                      "in anisotropic domains"
+
         assert self._decomp == 1, "ERROR decomp not 1D"
 
         dim = dim % 3
