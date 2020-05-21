@@ -790,6 +790,21 @@ class _baseAnalyzer(object):
 
         return deriv
 
+    def truncate_along_z(self, var, izs, ize):
+        varT = self.z2y_slab_exchange(var)
+        return self.y2z_slab_exchange(varT[izs:ize])
+
+    def flame_extents(self, Y):
+        YT = self.z2y_slab_exchange(Y)
+
+        zfs = np.min(np.nonzero(YT > 0.001)[0])
+        zfe = np.max(np.nonzero(YT < 0.999)[0])
+
+        zfs = self.comm.allreduce(zfs, op=MPI.MIN)
+        zfe = self.comm.allreduce(zfe, op=MPI.MAX)
+
+        return zfs, zfe
+
 
 # -----------------------------------------------------------------------------
 class _hitAnalyzer(_baseAnalyzer):
@@ -1071,64 +1086,3 @@ class _hitAnalyzer(_baseAnalyzer):
         var[2] = tcfft.irfft3(self.comm, fvar[2])
 
         return var
-
-    def half_reflect_periodization(self, var, izs=None):
-        """Shift and reflect half of scalar volume in z-direction.
-
-        MPI-transpose a 3D scalar volume with 1D domain decomposition
-        then take center half (nz//4:3*nz//4), shift (to 0:nz//2), and
-        reflect along z-direction (varT[:nz//2] == varT[nz//2::-1])
-
-        Parameters
-        ----------
-        var : MPI-distributed ndarray
-            MPI-decomposed 3D scalar volume (1D domain decomposition)
-
-        Returns
-        -------
-        MPI-distributed ndarray
-            reflected center half-volume
-        """
-        varT = self.z2y_slab_exchange(var)
-        nz, nny, nx = varT.shape
-        nzq = nz//4
-        nzh = nz//2
-        if izs is None:
-            izs = nzq
-
-        temp = np.empty((nzh, nny, nx), dtype=varT.dtype)
-        temp[:] = varT[izs:izs+nzh]
-        varT[:nzh] = temp
-        varT[nzh:] = temp[::-1]
-
-        assert np.all(varT[nzq] == varT[nzq+nzh-1])
-
-        var[:] = self.y2z_slab_exchange(varT)
-
-        return var
-
-    def qtr_truncate_reflected_var(self, var, izs=None):
-        # at the start var is reflected in center, so only half the domain
-        # contains unique information. We want just half of that half.
-        varT = self.z2y_slab_exchange(var)
-
-        nz, nny, nx = varT.shape
-        izs = nz//8
-        ize = izs+nz//4
-
-        return self.y2z_slab_exchange(varT[izs:ize])
-
-    def truncate_along_z(self, var, izs, ize):
-        varT = self.z2y_slab_exchange(var)
-        return self.y2z_slab_exchange(varT[izs:ize])
-
-    def flame_extents(self, Y):
-        YT = self.z2y_slab_exchange(Y)
-
-        zfs = np.min(np.nonzero(YT > 0.001)[0])
-        zfe = np.max(np.nonzero(YT < 0.999)[0])
-
-        zfs = self.comm.allreduce(zfs, op=MPI.MIN)
-        zfe = self.comm.allreduce(zfe, op=MPI.MAX)
-
-        return zfs, zfe
