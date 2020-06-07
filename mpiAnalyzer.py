@@ -65,7 +65,7 @@ from . import stats as tcstats      # statistical functions
 # from .diff import central as tcfd   # finite difference functions
 from .diff import akima as tcas     # Akima spline approximation functions
 
-__all__ = []
+__all__ = ['mpiAnalyzer', '_baseAnalyzer', '_hitAnalyzer']
 
 
 # -----------------------------------------------------------------------------
@@ -320,9 +320,52 @@ class _baseAnalyzer(object):
     def L(self):
         return self._L
 
+    @L.setter
+    def L(self, L):
+        "setter for L that also updates dx, etc."
+        if np.iterable(L):
+            if len(L) == 1:
+                self._L = np.array(list(L)*self._ndims, dtype=np.float64)
+            elif len(L) == self._ndims:
+                self._L = np.array(L, dtype=np.float64)
+            else:
+                raise ValueError("The length of L must be either 1 or ndims")
+        elif np.isscalar(L):
+            self._L = np.array([L]*self._ndims, dtype=np.float64)
+        else:  # I think None and dicts might be what's left
+            raise ValueError("Unrecognized argument type! L should be a "
+                             "scalar or array_like.")
+
+        self._dx = self._L/self._nx
+
     @property
     def nx(self):
         return self._nx
+
+    @nx.setter
+    def nx(self, N):
+        """setter for nx that also updates dx, nnx, ixs, ixe, etc."""
+        if np.iterable(N):
+            if len(N) == 1:
+                self._nx = np.array(list(N)*self._ndims, dtype=np.int)
+            elif len(N) == self._ndims:
+                self._nx = np.array(N, dtype=np.int)
+            else:
+                raise ValueError("The length of N must be either 1 or ndims")
+        elif np.isscalar(N):
+            self._nx = np.array([N]*self._ndims, dtype=np.int)
+        else:  # I think None and dicts might be what's left
+            raise ValueError("Unrecognized argument type! N should be a "
+                             "scalar or array_like.")
+
+        self._dx = self._L/self._nx
+
+        dims = self._comm.dims
+        assert np.all(np.mod(self._nx, dims) == 0)
+
+        self._nnx = self._nx//dims
+        self._ixs = self._nnx*self.comm.coords
+        self._ixe = self._ixs+self._nnx
 
     @property
     def dx(self):
@@ -439,97 +482,25 @@ class _baseAnalyzer(object):
 
         return hist, range, lhist
 
-    def conditional_mean(self, var, cond, fname, header=None,
-                         bins=100, range=None, counts=None):
+    def conditional_mean(self, var, cond, filename, header=None,
+                         bins=100, range=None):
         """Computes the MPI-distributed mean of `var` conditional on
-        the binned values of `cond`.
+        the binned values of `cond` and then writes the information to
+        to file.
 
-        This is an MPI-distributed equivalent to calling
-        `scipy.stats.binned_static(cond, var, 'mean', bins, range)`.
-
-        Parameters
-        ----------
-        var : MPI-distributed ndarray
-            [description]
-        cond : MPI-distributed ndarray
-            [description]
-        fname : string
-            [description]
-        header : string
-            [description]
-        bins : sequence or int, optional
-            An array_like sequence describing the bin edges or an integer
-            value describing the number of bins between the lower and upper
-            range values (the default is 100).
-        range : sequence, optional
-            A sequence of lower and upper bin edges to be used if the edges
-            are not given explicitly in `bins`. The default is to use the
-            MPI-reduced minimum and maximum values of `cond`.
-        counts : [N+2,]-shaped ndarray, optional
-            (All ranks) the MPI-reduced histogram of `cond`, including
-            outlier bins, generated, for instance, by a previous invocation
-            of `conditional_mean`. If present, assumes `cond` is properly
-            digitized, as if it were the `binned_cond` result of a previous
-            invocation of `conditional_mean`.
-
-        Returns
-        -------
-        cond_mean : [N,]-shaped ndarray
-            (All ranks) ndarray of MPI-reduced conditional means of
-            `var` with length N equal to the number of bins used to
-            digitize `cond`.
-        binned_cond : MPI-distribued ndarray
-            (local to rank) digitized (with rightmost-edge correction)
-            `cond` array.
-        counts : [N+2,]-shaped ndarray
-            (All ranks) MPI-reduced histogram of `cond`, including
-            outlier bins.
-        outliers : (2, )-shaped tuple
-            (All ranks) MPI-reduced mean of `var` conditioned on low
-            and high value of `cond` outside of the provided `bin` edge
-            sequence or `range`.
+        A convenience wrapper for `tcstats.binned_sum`.
         """
-        if header is None:
-            header = 'NOTE: data includes outlier bins.\n# cols: sums, counts'
 
-        if counts is None:
-            results = tcstats.conditional_mean(var, cond, bins, range,
-                                               self.comm)
-            cond_mean, binned_cond, counts, outliers = results
-            binsum = np.r_[outliers[0], cond_mean, outliers[1]] * counts
-
-            if np.isscalar(bins):
-                nbin = bins
-            else:
-                nbin = len(bins) - 1
-
-        else:
-            # taken straight from tcstats.conditional_mean
-            binned_cond = cond
-            valid = counts.nonzero()
-            nbin = counts.size
-
-            binsum = np.bincount(binned_cond.ravel(), var.ravel(),
-                                 minlength=nbin)
-            self.comm.Allreduce(MPI.IN_PLACE, binsum, op=MPI.SUM)
-
-            cond_mean = np.zeros(nbin, float)
-            cond_mean.fill(np.nan)
-            cond_mean[valid] = binsum[valid]/counts[valid]
-            outliers = (cond_mean[0], cond_mean[-1])
-            cond_mean = cond_mean[1:-1]
-
-        if range is None:
-            cmin = self.comm.allreduce(cond.min(), op=MPI.MIN)
-            cmax = self.comm.allreduce(cond.max(), op=MPI.MAX)
-        else:
-            cmin, cmax = range
+        binsum, counts, indices = tcstats.binned_sum(
+                                        var, cond, bins, range, self.comm)
 
         # write conditional means to file from root task
-        if (self.comm.rank == 0) and fname:
-            with open(fname, 'w') as fh:
-                fh.write('# %s\n' % header)
-                fh.write('# %d %-14.8e %-14.8e\n' % (nbin, cmin, cmax))
+        if self.comm.rank == 0:
+            with open(filename, 'w') as fh:
+                if header is not None:
+                    fh.write(f'# {header}\n')
+                fh.write('# NOTE: data includes outlier bins.\n')
+                fh.write('# cols:    sums,    counts\n')
                 cols = np.zeros(counts.size, dtype=[
                                 ('col1', np.float64), ('col2', np.int64)])
                 cols['col1'] = binsum
@@ -537,7 +508,7 @@ class _baseAnalyzer(object):
                 columns = np.stack((binsum, counts), axis=-1)
                 np.savetxt(fh, columns, fmt='%-15.8e %-15d')
 
-        return cond_mean, binned_cond, counts, outliers
+        return binsum, counts, indices
 
     # -------------------------------------------------------------------------
     # Scalar and Vector Derivatives
@@ -775,8 +746,8 @@ class _baseAnalyzer(object):
             shape = list(var.shape)
             shape[axis] += 2*ng
             temp = np.empty(shape, dtype=var.dtype)
-            tempT = temp.transpose(axes)  # new _view_ into the inputs
-            varT = var.transpose(axes)    # new _view_ into the inputs
+            tempT = temp.transpose(axes)  # new _view_ into temp
+            varT = var.transpose(axes)    # new _view_ into var
             assert np.may_share_memory(temp, tempT)
             tempT[3:-3] = varT
             tempT[:3] = varT[-6:-3]
@@ -789,21 +760,6 @@ class _baseAnalyzer(object):
             deriv = self.y2z_slab_exchange(deriv)
 
         return deriv
-
-    def truncate_along_z(self, var, izs, ize):
-        varT = self.z2y_slab_exchange(var)
-        return self.y2z_slab_exchange(varT[izs:ize])
-
-    def flame_extents(self, Y):
-        YT = self.z2y_slab_exchange(Y)
-
-        zfs = np.min(np.nonzero(YT > 0.001)[0])
-        zfe = np.max(np.nonzero(YT < 0.999)[0])
-
-        zfs = self.comm.allreduce(zfs, op=MPI.MIN)
-        zfe = self.comm.allreduce(zfe, op=MPI.MAX)
-
-        return zfs, zfe
 
 
 # -----------------------------------------------------------------------------

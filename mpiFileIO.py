@@ -45,7 +45,7 @@ from mpi4py import MPI
 import numpy as np
 import os
 
-__all__ = []
+__all__ = ['mpiFileIO', '_binaryFileIO']
 
 
 def mpiFileIO(comm=MPI.COMM_WORLD, idir='./', odir='./', ftype=None,
@@ -180,6 +180,10 @@ class _binaryFileIO(object):
         return self._periodic
 
     @property
+    def nxf(self):
+        return self._nxf
+
+    @property
     def nx(self):
         return self._nx
 
@@ -198,6 +202,7 @@ class _binaryFileIO(object):
     # -------------------------------------------------------------------------
     # Class Methods
     # -------------------------------------------------------------------------
+
     def Read_all(self, filename, ftype=np.float32, mtype=np.float32):
         """
         Read an entire file into MPI-distributed memory with n-dimensional
@@ -233,6 +238,12 @@ class _binaryFileIO(object):
         """
         assert np.all(np.array(data.shape) == self._nnx)
 
+        filename = os.path.join(self.odir, filename)
+        dirname = os.path.dirname(filename)
+        if not os.path.exists(dirname):
+            if self.comm.rank == 0:
+                os.makedirs(dirname)
+
         ftype = np.dtype(ftype)
         temp = data.astype(ftype, casting='safe', copy=False)
 
@@ -243,7 +254,7 @@ class _binaryFileIO(object):
             etype, filetype = self._Create_subarray(key)
 
         status = MPI.Status()
-        fh = MPI.File.Open(self.comm, os.path.join(self.odir, filename),
+        fh = MPI.File.Open(self.comm, filename,
                            MPI.MODE_WRONLY | MPI.MODE_CREATE)
 
         # adding a loop over disp would allow for multiple scalars per file

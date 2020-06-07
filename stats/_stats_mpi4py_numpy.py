@@ -5,11 +5,17 @@ domain decomposition or dimensionality.
 
 from mpi4py import MPI
 import numpy as np
+from math import fsum as _math_fsum
 
-__all__ = ['psum', 'central_moments', 'conditional_mean',
+__all__ = ['fsum', 'psum', 'central_moments', 'binned_sum', 'bincount_',
            'histogram1', 'histogram2']
 
 COMM_WORLD = MPI.COMM_WORLD
+
+
+def fsum(data):
+    "wrapper for math.fsum(data.ravel())"
+    return _math_fsum(data.ravel())
 
 
 def psum(data):
@@ -101,12 +107,10 @@ def central_moments(data, N=None, w=None, wbar=None, m1=None, comm=COMM_WORLD):
     return m1, c2, c3, c4, c5, c6, gmin, gmax
 
 
-def conditional_mean(var, cond, bins=100, range=None, comm=COMM_WORLD):
-    """Computes the MPI-distributed mean of `var` conditional on the
-    binned values of `cond`.
-
-    This is an MPI-distributed equivalent to calling
-    `scipy.stats.binned_static(cond, var, 'mean', bins, range)`.
+def binned_sum(var, cond, bins=100, range=None, comm=COMM_WORLD):
+    """Computes the MPI-distributed sum of `var` conditioned on the
+    binned values of `cond`. This is the MPI-distributed equivalent to
+    `scipy.stats.binned_statistic(cond, var, 'mean', bins, range)`.
 
     Parameters
     ----------
@@ -128,22 +132,20 @@ def conditional_mean(var, cond, bins=100, range=None, comm=COMM_WORLD):
 
     Returns
     -------
-    cond_mean : [N,]-shaped ndarray
+    binsum : [N,]-shaped ndarray
         (All ranks) ndarray of MPI-reduced conditional mean of `var`
-        with length N equal to the number of bins used to digitize `cond`.
-    binned_cond : MPI-distribued ndarray
-        (local to rank) digitized and rightmost-edge-corrected `cond` array.
-    counts : [N+2,]-shaped ndarray
-        (All ranks) MPI-reduced histogram of `cond`, including outlier bins.
-    outliers : (2, )-shaped tuple
-        (All ranks) MPI-reduced mean of `var` conditioned on low and
-        high outliers of `cond` outside of provided `bin` edge sequence
-        or `range`.
+        with length N equal to the number of bins needed to digitize
+        `cond`, including outliers.
+    bincounts : [N,]-shaped ndarray
+        (All ranks) MPI-distributed histogram of `indices`, including
+        outlier bins.
+    indices : MPI-distribued 1-D ndarray
+        (local to rank) digitized `cond` array with shape `(cond.size, )`
     """
 
     # Create edge arrays
     if np.isscalar(bins):
-        nbin = bins + 2
+        nbins = bins + 2
 
         # Get the range
         if range is None:
@@ -153,42 +155,31 @@ def conditional_mean(var, cond, bins=100, range=None, comm=COMM_WORLD):
         else:
             cmin, cmax = range
 
-        edges = np.linspace(cmin, cmax, nbin - 1)
+        edges = np.linspace(cmin, cmax, nbins - 1)
 
     else:
         edges = np.asarray(bins, float)
-        nbin = edges.size + 1
+        nbins = edges.size + 1
 
-    dedges = np.diff(edges)
+    indices = np.digitize(cond.ravel(), edges)
 
-    # Compute the bin number each data point falls into
-    binned_cond = np.digitize(cond, edges)
+    bincounts = np.bincount(indices, minlength=nbins)
+    comm.Allreduce(MPI.IN_PLACE, bincounts, op=MPI.SUM)
 
-    # Using `digitize`, values that fall on an edge are put in the right
-    # bin. For the rightmost bin, we want values equal to the right edge
-    # to be counted in the last bin, and not as an outlier.
-    # -- Find the rounding precision
-    decimal = int(-np.log10(dedges.min())) + 6
-    # -- Find which points are on the rightmost edge.
-    on_edge = np.where(np.around(cond, decimal) ==
-                       np.around(edges[-1], decimal))
-    # -- Shift these points one bin to the left.
-    binned_cond[on_edge] -= 1
-
-    counts = np.bincount(binned_cond.ravel(), minlength=nbin)
-    comm.Allreduce(MPI.IN_PLACE, counts, op=MPI.SUM)
-
-    cond_mean = np.empty(nbin, float)
-    cond_mean.fill(np.nan)
-    valid = counts.nonzero()
-    binsum = np.bincount(binned_cond.ravel(), var.ravel(), minlength=nbin)
+    binsum = np.bincount(indices, var.ravel(), minlength=nbins)
     comm.Allreduce(MPI.IN_PLACE, binsum, op=MPI.SUM)
-    cond_mean[valid] = binsum[valid]/counts[valid]
 
-    outliers = (cond_mean[0], cond_mean[-1])
-    cond_mean = cond_mean[1:-1]
+    return binsum, bincounts, indices
 
-    return cond_mean, binned_cond, counts, outliers
+
+def bincount_(x, weights, minlength=0, comm=COMM_WORLD):
+    """A very short MPI-wrapped version of `numpy.bincount` that expects
+    a weights array. See `numpy.bincount` and the source code.
+    """
+    out = np.bincount(x.ravel(), weights.ravel(), minlength)
+    comm.Allreduce(MPI.IN_PLACE, out, op=MPI.SUM)
+
+    return out
 
 
 def histogram1(var, bins=50, range=None, w=None, comm=COMM_WORLD):

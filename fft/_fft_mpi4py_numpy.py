@@ -187,6 +187,8 @@ def y2z_slab_exchange(comm, varT, var=None):
     Assumes 1D domain decomposition
     """
 
+    assert False, "this function is definitely broken!!!"
+
     nz, nny, nx = varT.shape
     nnz = nz//comm.size
     ny = nny*comm.size
