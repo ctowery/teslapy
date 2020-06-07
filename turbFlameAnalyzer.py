@@ -105,7 +105,7 @@ class turbFlameAnalyzer(_baseAnalyzer):
 
         out = None
         if self.comm.rank == 0:
-            out = np.array_like(binsum)
+            out = np.empty_like(binsum)
         self.comm.Reduce(binsum, out, op=MPI.SUM, root=0)
 
         return out or 0.0
