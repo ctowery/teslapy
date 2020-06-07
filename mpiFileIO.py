@@ -245,7 +245,7 @@ class _binaryFileIO(object):
                 os.makedirs(dirname)
 
         ftype = np.dtype(ftype)
-        temp = data.astype(ftype, casting='safe', copy=False)
+        temp = data.astype(ftype, casting='unsafe', copy=False)
 
         key = '%s%d' % (ftype.kind, ftype.itemsize)
         if key in self._subarrays:
