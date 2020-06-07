@@ -39,8 +39,8 @@ class turbFlameAnalyzer(_baseAnalyzer):
     # -------------------------------------------------------------------------
     # Class Instantiator
     # -------------------------------------------------------------------------
-    def __init__(self, comm=COMM, odir='./analysis/', pid='test',
-                 L=[2*np.pi]*3, N=[512]*3, **kwargs):
+    def __init__(self, comm=MPI.COMM_WORLD, odir='./analysis/', pid='test',
+                 L=[2*np.pi]*3, N=[512]*3):
 
         ndims = 3
         decomp = 1
@@ -188,23 +188,19 @@ class turbFlameArrhFilteredStats(turbFlameAnalyzer):
     # -------------------------------------------------------------------------
     # Class Instantiator
     # -------------------------------------------------------------------------
-    def __init__(self, nxfile, nxfft, nxstats, **kwargs):
-
-        # ------------------------------------------------------------------
-        N = kwargs.pop('N')
-        L = kwargs.pop('L')
+    def __init__(self, nxfile, nxfft, nxstats, L=[2*np.pi]*3, N=[512]*3,
+                 idir='./analysis/', odir='./analysis/', pid='test'):
 
         # ------------------------------------------------------------------
         # call turbFlameAnalyzer.__init__() to set up FFT variables with
         # domain size `nxfft`
-        super().__init__(self, L=L*nxfft/N, N=nxfft, **kwargs)
+        super().__init__(self, L=L*nxfft/N, N=nxfft, odir=odir, pid=pid)
         assert COMM.rank == self.comm.rank
 
-        self.reader = mpiFileIO(N=nxfile, ixs=None, ixe=nxfft, **kwargs)
+        self.reader = mpiFileIO(N=nxfile, ixs=None, ixe=nxfft, idir=idir)
         assert COMM.rank == self.reader.comm.rank
 
-        kwargs['odir'] = kwargs['idir']
-        self.writer = mpiFileIO(N=nxstats, **kwargs)
+        self.writer = mpiFileIO(N=nxstats, idir=idir, odir=idir)
 
         self._nnxf = self._nnx
 
