@@ -45,7 +45,7 @@ from mpi4py import MPI
 import numpy as np
 import os
 
-__all__ = ['mpiFileIO', '_binaryFileIO']
+__all__ = ['mpiFileIO']
 
 
 def mpiFileIO(comm=MPI.COMM_WORLD, idir='./', odir='./', ftype=None,

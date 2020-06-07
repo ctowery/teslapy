@@ -65,7 +65,7 @@ from . import stats as tcstats      # statistical functions
 # from .diff import central as tcfd   # finite difference functions
 from .diff import akima as tcas     # Akima spline approximation functions
 
-__all__ = ['mpiAnalyzer', '_baseAnalyzer', '_hitAnalyzer']
+__all__ = ['mpiAnalyzer']
 
 
 # -----------------------------------------------------------------------------
