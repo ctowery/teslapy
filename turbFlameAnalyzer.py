@@ -106,9 +106,13 @@ class turbFlameAnalyzer(_baseAnalyzer):
         out = None
         if self.comm.rank == 0:
             out = np.empty_like(binsum)
+
         self.comm.Reduce(binsum, out, op=MPI.SUM, root=0)
 
-        return out or 0.0
+        if self.comm.rank !=0:
+            out = 0.0
+
+        return out
 
     def fft(self, var):
         """
