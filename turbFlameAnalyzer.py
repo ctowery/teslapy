@@ -39,15 +39,14 @@ class turbFlameAnalyzer(_baseAnalyzer):
     # -------------------------------------------------------------------------
     # Class Instantiator
     # -------------------------------------------------------------------------
-    def __init__(self, comm=MPI.COMM_WORLD, odir='./analysis/', pid='test',
-                 L=[2*np.pi]*3, N=[512]*3):
+    def __init__(self, comm=COMM, L=np.pi, N=512, odir='./', pid='test'):
 
         ndims = 3
         decomp = 1
         periodic = [True]*3
         method = 'akima_flux_diff'
 
-        super().__init__(comm, odir, pid, ndims, decomp, periodic, L, N,
+        super().__init__(self, comm, odir, pid, ndims, decomp, periodic, L, N,
                          method)
 
         self._config = "Coarse-graining analysis of `turbflame`-like data"
