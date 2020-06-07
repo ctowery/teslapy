@@ -5,7 +5,8 @@ import numpy as np
 import argparse
 # from memory_profiler import profile
 
-from .mpiAnalyzer import _baseAnalyzer, mpiFileIO
+from .mpiAnalyzer import _baseAnalyzer
+from .mpiFileIO import mpiFileIO
 from . import fft as tcfft
 
 __all__ = []
