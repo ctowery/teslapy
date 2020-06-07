@@ -40,7 +40,7 @@ class turbFlameAnalyzer(_baseAnalyzer):
     # Class Instantiator
     # -------------------------------------------------------------------------
     def __init__(self, comm=COMM, odir='./analysis/', pid='test',
-                 L=[2*np.pi]*3, N=[512]*3):
+                 L=[2*np.pi]*3, N=[512]*3, **kwargs):
 
         ndims = 3
         decomp = 1
