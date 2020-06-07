@@ -43,10 +43,10 @@ class turbFlameAnalyzer(_baseAnalyzer):
 
         ndims = 3
         decomp = 1
-        periodic = [True]*3
+        periodic = [True, ]*3
         method = 'akima_flux_diff'
 
-        super().__init__(self, comm, odir, pid, ndims, decomp, periodic, L, N,
+        super().__init__(comm, odir, pid, ndims, decomp, periodic, L, N,
                          method)
 
         self._config = "Coarse-graining analysis of `turbflame`-like data"
@@ -193,7 +193,7 @@ class turbFlameArrhFilteredStats(turbFlameAnalyzer):
         # ------------------------------------------------------------------
         # call turbFlameAnalyzer.__init__() to set up FFT variables with
         # domain size `nxfft`
-        super().__init__(self, L=L*nxfft/N, N=nxfft, odir=odir, pid=pid)
+        super().__init__(L=L*nxfft/N, N=nxfft, odir=odir, pid=pid)
         assert COMM.rank == self.comm.rank
 
         self.reader = mpiFileIO(N=nxfile, ixs=None, ixe=nxfft, idir=idir)
