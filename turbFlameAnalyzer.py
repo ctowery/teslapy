@@ -35,6 +35,9 @@ class turbFlameAnalyzer(_baseAnalyzer):
     parser.add_argument('--iz0', type=int)
     parser.add_argument('--gamma', type=float)
     parser.add_argument('--speed', type=float)
+    parser.add_argument('--jfs', type=float)
+    parser.add_argument('--jfe', type=float)
+    parser.add_argument('--fint', type=float)
 
     # -------------------------------------------------------------------------
     # Class Instantiator
@@ -234,3 +237,44 @@ class turbFlameArrhFilteredStats(turbFlameAnalyzer):
         fname = f"{var_name}/{var_name}_{tstep}.bin"
         # returns MPI-IO status
         return self.writer.Write_all(fname, var)
+
+    def dump_slices(self, var, var_name, ix=None, jy=0, kz=None):
+        """Dump 2D slices from 3D scalar field.
+
+        `dump_slices` currently assumes 1D domain decomposition along
+        0th axis. Would definitely need to rethink this for a generic
+        N-dimensional domain decomposition."""
+
+        if np.isscalar(ix):
+            ix = (ix, )
+        if np.isscalar(jy):
+            jy = (jy, )
+        if np.isscalar(kz):
+            kz = (kz, )
+        x_slices = None
+        if ix:
+            data = self.comm.gather(var[:, :, ix])
+            if self.comm.rank == 0:
+                x_slices = np.concatenate(data, axis=0)
+                filename = f'{self.odir}/{self.pid}_{var_name}-xslices.npy'
+                np.save(filename, x_slices.astype('f4'), allow_pickle=False)
+
+        y_slices = None
+        if jy:
+            data = self.comm.gather(var[:, jy, :])
+            if self.comm.rank == 0:
+                y_slices = np.concatenate(data, axis=0)
+                filename = f'{self.odir}/{self.pid}_{var_name}-yslices.npy'
+                np.save(filename, y_slices.astype('f4'), allow_pickle=False)
+
+        z_slices = None
+        if kz:
+            krange = range(self.ixs[0], self.ixe[0])
+            bool_idx = [k in np.atleast_1d(kz) for k in krange]
+            data = self.comm.gather(var[bool_idx, :, :])
+            if self.comm.rank == 0:
+                z_slices = np.concatenate(data, axis=0)
+                filename = f'{self.odir}/{self.pid}_{var_name}-zslices.npy'
+                np.save(filename, z_slices.astype('f4'), allow_pickle=False)
+
+        return x_slices, y_slices, z_slices

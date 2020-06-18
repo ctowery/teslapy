@@ -23,7 +23,7 @@ import numpy as np
 from numba import jit
 from scipy.interpolate import Akima1DInterpolator as _interp
 
-__all__ = ['flux_diff', 'interp3d', 'interp1d', '_deriv']
+__all__ = ['flux_diff']
 
 
 def _deriv(phi, h, axis=0):
@@ -99,57 +99,53 @@ def flux_diff(var, dx, axis=0, ng=3):
     # assert np.may_share_memory(out, outT)
 
     nx0, nx1, nx2 = varT.shape
-    x = np.arange(nx2).astype(var.dtype)
 
-    # midpoints surrounding internal data points
-    xh = 0.5*(x[ng-1:-ng] + x[ng:-ng+1])
+    # x = np.arange(nx2).astype(var.dtype)
+    # xh = 0.5*(x[ng-1:-ng] + x[ng:-ng+1])
 
     # since axis 2 of varT may not actually be contiguous, use temp array
     for k in range(nx0):
         for j in range(nx1):
             temp = np.ascontiguousarray(varT[k, j])
-            varh = interp1d(x, temp, xh)
+            varh = fast_interp(temp, dx)
             outT[k, j] = dx_inv*(varh[1:] - varh[:-1])
 
     return out
 
 
 @jit(nopython=True, nogil=True, cache=True)
-def interp3d(x0, x1, x2, f, xp):
+def fast_interp(f, dx):
     """
-    Returns scalar function value at a single point in three-dimensional
-    space using tri-cubic Akima spline interpolation
+    Returns scalar function values at midpoint locations of a uniform
+    grid in one-dimensional space using cubic Akima spline interpolation
     """
-    # x0 = np.asarray(x0)
-    # x1 = np.asarray(x1)
-    # x2 = np.asarray(x2)
-    # f = np.asarray(f)
-    # xp = np.asarray(xp)
-    nk, nj, ni = f.shape
+    # dx = x[1:] - x[:-1]
+    m = (f[1:] - f[:-1]) / dx    # m.size = x.size - 1
+    dm = np.abs(m[1:] - m[:-1])  # dm.size = x.size - 2
+    a = dm[2:]   # a = |m[3]-m[2]|, |m[4]-m[3]|
+    b = dm[:-2]  # b = |m[1]-m[0]|, |m[2]-m[1]|
+    ab = a + b
 
-    # assert x0.ndim == x1.ndim == x2.ndim == 1  # , 'x0, x1, x2 must be 1D!'
-    # assert xp.size == 3  # , 'xp must have size 3!'
+    # t.size = x.size - 4, also scipy uses ab > 1e-9*ab.max() for some reason
+    t = np.where(ab > 0.0, (a*m[1:-2] + b*m[2:-1]) / ab,
+                 0.5*(m[1:-2] + m[2:-1]))
 
-    # assert x0.size == nk
-    # assert x1.size == nj
-    # assert x2.size == ni
-    # assert nk == nj and nj == ni and ni == 6
+    # NOTE THAT p1.size = p2.size = p3.size == xh.size!!!
+    p1 = t[:-1]
+    p2 = (3.0*m[2:-2] - 2.0*t[:-1] - t[1:]) / dx
+    p3 = (t[:-1] + t[1:] - 2.0*m[2:-2]) / dx**2
 
-    tk = np.empty(nk, dtype=f.dtype)
-    tj = np.empty(nj, dtype=f.dtype)
-
-    for k in range(nk):
-        for j in range(nj):
-            tj[j] = interp1d(x2, f[k, j], np.array([xp[2]]))[0]
-        tk[k] = interp1d(x1, tj, np.array([xp[1]]))[0]
-
-    fi = interp1d(x0, tk, np.array([xp[0]]))
+    # idx was such that x[idx] <= xi < x[idx+1], but since xi are just
+    # the sorted midpoints in a uniform grid x, we can do this instead:
+    w = 0.5*dx  # == xi - x[idx]
+    p0 = f[2:-3]  # because x[ng-1:-ng] <= xi[:] < x[ng:-(ng-1)]
+    fi = p0 + p1*w + p2*w**2 + p3*w**3
 
     return fi
 
 
 @jit(nopython=True, nogil=True, cache=True)
-def interp1d(x, f, xi):
+def interp1d(x, f, xi, limit_extrema=False):
     """
     Returns scalar function values at any number of points in
     one-dimensional space using cubic Akima spline interpolation
@@ -191,6 +187,7 @@ def interp1d(x, f, xi):
     # fi = p0 + (p1[idx] + (p2[idx] + p3[idx]*w)*w)*w
 
     # preserve extrema -- not a part of the original Akima spline!!
-    fi = np.fmin(fmax, np.fmax(fi, fmin))
+    if limit_extrema is True:
+        fi = np.fmin(fmax, np.fmax(fi, fmin))
 
     return fi
