@@ -35,8 +35,8 @@ class turbFlameAnalyzer(_baseAnalyzer):
     parser.add_argument('--iz0', type=int)
     parser.add_argument('--gamma', type=float)
     parser.add_argument('--speed', type=float)
-    parser.add_argument('--jfs', type=float)
-    parser.add_argument('--jfe', type=float)
+    # parser.add_argument('--jfs', type=float)
+    # parser.add_argument('--jfe', type=float)
     parser.add_argument('--fint', type=float)
 
     # -------------------------------------------------------------------------
