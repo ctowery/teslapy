@@ -74,7 +74,7 @@ def _deriv(phi, h, axis=0):
     return deriv
 
 
-@jit(nopython=True, nogil=True)
+# @jit(nopython=True, nogil=True, cache=True)
 def flux_diff(var, dx, axis=0, ng=3):
     """
     1st order difference of interpolated midpoints along given axis of var.
@@ -96,7 +96,8 @@ def flux_diff(var, dx, axis=0, ng=3):
     outT = out.transpose(axes)   # new _view_ into the outputs
 
     # if outT isn't a view, return is "empty"
-    # assert np.may_share_memory(out, outT)
+    assert np.shares_memory(var, varT)
+    assert np.shares_memory(out, outT)
 
     nx0, nx1, nx2 = varT.shape
 
