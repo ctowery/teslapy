@@ -730,31 +730,37 @@ class _baseAnalyzer(object):
 
         return deriv
 
-    def _akima_slab_deriv(self, var, dim=0, k=1, ng=3, valid_ghosts=False):
+    def _akima_slab_deriv(self, var, dim=0, k=1, ng=3):
         """
         Calculate and return the _first_ derivative of a 3D scalar field.
         The k parameter is ignored, a first derivative is _always_ returned.
         """
         dim = dim % 3
         axis = 2-dim
+        lo_slice = [slice(None), ]*3  # == [:, :, :]
+        hi_slice = [slice(None), ]*3  # == [:, :, :]
 
         if axis == 0:
             var = self.z2y_slab_exchange(var)
 
-        if not valid_ghosts:
-            axes = (axis, (axis+1) % 3, (axis+2) % 3)
-            shape = list(var.shape)
-            shape[axis] += 2*ng
-            temp = np.empty(shape, dtype=var.dtype)
-            tempT = temp.transpose(axes)  # new _view_ into temp
-            varT = var.transpose(axes)    # new _view_ into var
-            assert np.may_share_memory(temp, tempT)
-            tempT[3:-3] = varT
-            tempT[:3] = varT[-6:-3]
-            tempT[-3:] = varT[3:6]
-            var = temp
+        shape = list(var.shape)
+        shape[axis] += 2*ng
+        varg = np.empty(shape, dtype=var.dtype)
 
-        deriv = tcas.flux_diff(var, dx=self.dx[axis], axis=axis, ng=3)
+        # copy var
+        lo_slice[axis] = slice(ng, -ng)
+        mid_slice = tuple(lo_slice)
+        varg[mid_slice] = var
+
+        # copy "lo" and "hi" ghost cells
+        lo_slice[axis] = slice(None, +ng)
+        hi_slice[axis] = slice(-ng, None)  # relative slicing FTW!!
+        lo_slice = tuple(lo_slice)
+        hi_slice = tuple(hi_slice)
+        varg[lo_slice] = var[hi_slice]
+        varg[hi_slice] = var[lo_slice]
+
+        deriv = tcas.flux_diff(varg, dx=self.dx[axis], axis=axis, ng=3)
 
         if axis == 0:
             deriv = self.y2z_slab_exchange(deriv)
