@@ -95,10 +95,6 @@ def flux_diff(var, dx, axis=0, ng=3):
     varT = np.transpose(var, axes=axes)   # new _view_ into the inputs
     outT = np.transpose(out, axes=axes)   # new _view_ into the outputs
 
-    # if outT isn't a view, return is "empty"
-    # assert np.shares_memory(var, varT)
-    # assert np.shares_memory(out, outT)
-
     nx0, nx1, nx2 = varT.shape
 
     # x = np.arange(nx2).astype(var.dtype)
@@ -110,8 +106,6 @@ def flux_diff(var, dx, axis=0, ng=3):
             temp = np.ascontiguousarray(varT[k, j])
             varh = fast_interp(temp, dx)
             outT[k, j] = dx_inv*(varh[1:] - varh[:-1])
-
-    # outT = out.transpose(axes)   # new _view_ into the outputs
 
     return out
 
