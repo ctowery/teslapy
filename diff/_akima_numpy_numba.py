@@ -79,23 +79,27 @@ def flux_diff(var, dx, axis=0, ng=3):
     """
     1st order difference of interpolated midpoints along given axis of var.
     """
-    # assert var.ndim == 3, "ERROR: var.ndim not equal to 3!"
-    # assert ng > 2, "ERROR: a minimum 3 ghost cells on each side are required!"
+    assert var.ndim == 3, "ERROR: var.ndim not equal to 3!"
+    assert ng > 2, "ERROR: a minimum 3 ghost cells on each side are required!"
 
     dx_inv = 1.0/dx
-    axis = axis % var.ndim
-
-    if axis != 2:
-        var = np.swapaxes(var, axis, 2)
 
     shape = list(var.shape)
     shape[axis] -= 2*ng
-    nx0, nx1, nx2 = shape
-    out = np.empty((nx0, nx1, nx2), dtype=var.dtype)
+    nx, ny, nz = shape
+    out = np.empty((nx, ny, nz), dtype=var.dtype)
 
-    # if outT isn't a view, then out == np.empty is returned unfilled
+    axis = axis % var.ndim
+    axes = ((axis+1) % 3, (axis+2) % 3, axis)
+
+    varT = np.transpose(var, axes=axes)   # new _view_ into the inputs
+    outT = np.transpose(out, axes=axes)   # new _view_ into the outputs
+
+    # if outT isn't a view, return is "empty"
     # assert np.shares_memory(var, varT)
     # assert np.shares_memory(out, outT)
+
+    nx0, nx1, nx2 = varT.shape
 
     # x = np.arange(nx2).astype(var.dtype)
     # xh = 0.5*(x[ng-1:-ng] + x[ng:-ng+1])
@@ -103,14 +107,13 @@ def flux_diff(var, dx, axis=0, ng=3):
     # since axis 2 of varT may not actually be contiguous, use temp array
     for k in range(nx0):
         for j in range(nx1):
-            temp = np.ascontiguousarray(var[k, j])
+            temp = np.ascontiguousarray(varT[k, j])
             varh = fast_interp(temp, dx)
-            out[k, j] = dx_inv*(varh[1:] - varh[:-1])
+            outT[k, j] = dx_inv*(varh[1:] - varh[:-1])
 
-    if axis != 2:
-        out = np.swapaxes(out, axis, 2)
+    # outT = out.transpose(axes)   # new _view_ into the outputs
 
-    return np.ascontiguousarray(out)
+    return out
 
 
 @jit(nopython=True, nogil=True, cache=True)
