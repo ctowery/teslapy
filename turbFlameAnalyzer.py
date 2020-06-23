@@ -28,11 +28,10 @@ class turbFlameAnalyzer(_hitAnalyzer):
 
         ndims = 3
         decomp = 1
-        periodic = [True, ]*3
+        # periodic = [True, ]*3
         method = 'akima_flux_diff'
 
-        super().__init__(comm, odir, pid, ndims, decomp, periodic, L, N,
-                         method)
+        super().__init__(comm, odir, pid, ndims, decomp, L, N, method)
 
         self._config = "Coarse-graining analysis of `turbflame`-like data"
 
