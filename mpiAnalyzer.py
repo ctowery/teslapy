@@ -387,7 +387,7 @@ class _baseAnalyzer(object):
     # Statistical Moments
     # -------------------------------------------------------------------------
     def psum(self, data):
-        return tcstats.psum(data)
+        return tcstats.fsum(data)
 
     def central_moments(self, data, w=None, wbar=None, m1=None):
         """
@@ -446,14 +446,15 @@ class _baseAnalyzer(object):
     # -------------------------------------------------------------------------
     # Histograms
     # -------------------------------------------------------------------------
-    def histogram1(self, var, fname, header='#', range=None, bins=100, w=None):
+    def histogram1(self, var, range=None, bins=100, w=None,
+                   fname=None, header='#'):
         """MPI-distributed univariate spatial histogram."""
 
         results = tcstats.histogram1(var, bins, range, w, self.comm)
         hist, lhist, bins, gmin, gmax = results
 
         # write histogram from root task
-        if self.comm.rank == 0:
+        if fname and self.comm.rank == 0:
             fh = open('%s/%s-%s.hist' % (self.odir, self.prefix, fname), 'w')
             fh.write('%s\n' % header)
             fh.write('%d  %14.8e  %14.8e\n' % (bins, gmin, gmax))
@@ -531,16 +532,14 @@ class _baseAnalyzer(object):
         """
         assert var.ndim == 4, "ERROR: var must be a vector field!"
 
-        temp = self.deriv(var[1], dim=2)
-        omega = np.empty((3, *temp.shape), dtype=var.dtype)
-
-        omega[0] = temp - self.deriv(var[2], dim=1)
+        omega = np.empty((3, *self.nnx), dtype=var.dtype)
+        omega[0] = self.deriv(var[1], dim=2) - self.deriv(var[2], dim=1)
         omega[1] = self.deriv(var[2], dim=0) - self.deriv(var[0], dim=2)
         omega[2] = self.deriv(var[0], dim=1) - self.deriv(var[1], dim=0)
 
         return omega
 
-    def scl_grad(self, var):
+    def grad(self, var):
         """
         Calculate and return the gradient vector field of a scalar field.
         """
@@ -553,7 +552,7 @@ class _baseAnalyzer(object):
 
         return grad
 
-    def grad(self, var):
+    def vgrad(self, var):
         """
         Calculate and return the gradient tensor field of a vector field.
         """
@@ -571,7 +570,7 @@ class _baseAnalyzer(object):
         Uses numpy.einsum which can be dramatically faster than
         alternative routines for many use cases
         """
-        A = self.grad(u)
+        A = self.vgrad(u)
 
         e = np.zeros((3, 3, 3))
         e[0, 1, 2] = e[1, 2, 0] = e[2, 0, 1] = 1
@@ -692,13 +691,16 @@ class _baseAnalyzer(object):
     # -------------------------------------------------------------------------
     def _centdiff_deriv(self, var, dim=0, k=1):
         """
+        EMPTY STUB UNDER DEVELOPMENT!
         Calculate and return the specified derivative of a 3D scalar field at
         the specified order of accuracy.
         While k is passed on to the central_deriv function in the teslacu
         finite difference module, central_deriv may not honor a request for
         anything but the first derivative, depending on it's state of
         development.
+        """
 
+        """
         dim = dim % 3
         axis = 2-dim
         if axis == 0:
@@ -715,26 +717,19 @@ class _baseAnalyzer(object):
 
     def _akima_deriv(self, var, dim=0, k=1):
         """
-        Calculate and return the _first_ derivative of a 3D scalar field.
-        The k parameter is ignored, a first derivative is _always_ returned.
+        EMPTY STUB UNDER DEVELOPMENT!
+        Arbitrary akima deriv function for nd-decomp.
         """
-        dim = dim % 3
-        axis = 2-dim
-        if axis == 0:
-            var = self.z2y_slab_exchange(var)
-
-        deriv = tcas._deriv(var, self.dx[axis], axis=axis)
-
-        if axis == 0:
-            deriv = self.y2z_slab_exchange(deriv)
-
-        return deriv
+        pass
 
     def _akima_slab_deriv(self, var, dim=0, k=1, ng=3):
         """
+        This function is for 1D decomp only!
         Calculate and return the _first_ derivative of a 3D scalar field.
         The k parameter is ignored, a first derivative is _always_ returned.
         """
+        assert self._decomp == 1, "ERROR decomp not 1D"
+
         dim = dim % 3
         axis = 2-dim
         lo_slice = [slice(None), ]*3  # == [:, :, :]
@@ -783,7 +778,6 @@ class _hitAnalyzer(_baseAnalyzer):
         periodic = [True]*ndims
         super().__init__(comm, odir, pid, ndims, decomp, periodic, L, N,
                          'ignore')
-
         self._config = "Homogeneous Isotropic Turbulence"
 
         # The teslacu.fft.rfft3 and teslacu.fft.irfft3 functions currently
@@ -792,27 +786,27 @@ class _hitAnalyzer(_baseAnalyzer):
         # These FFT routines and these variables below assume that ndims=3
         # which ruins the generality I so carefully crafted in the base
         # class
-        if self._decomp == 1 and ndims == 3:
-            # Spectral variables (1D Decomposition, 3D field)
-            self.nk = self.nx.copy()
-            self.nk[2] = self.nx[2]//2+1
-            self.nnk = self.nk.copy()
-            self.nnk[1] = self.nk[1]//comm.size
-            self.dk = 1.0/self.L
+        assert self._decomp == 1 and ndims == 3, "CONFIGURATION ERROR"
 
-            nny = self.nnk[1]
-            iys = nny*comm.rank
-            iye = iys + nny
+        self.nk = self.nx.copy()
+        self.nk[2] = self.nx[2]//2+1
+        self.nnk = self.nk.copy()
+        self.nnk[1] = self.nk[1]//comm.size
+        self.dk = 1.0/self.L
 
-            k2 = np.fft.rfftfreq(self.nx[2])*self.nx[2] * self.dk[2]
-            k1 = np.fft.fftfreq(self.nx[1])*self.nx[1] * self.dk[1]
-            k1 = k1[iys:iye].copy()
-            k0 = np.fft.fftfreq(self.nx[0])*self.nx[0] * self.dk[0]
+        nny = self.nnk[1]
+        iys = nny*comm.rank
+        iye = iys + nny
 
-            # MPI local 3D wavemode index
-            self.k = (k0, k1, k2)
-            Kvec = np.array(np.meshgrid(k0, k1, k2, indexing='ij'))
-            self.Kmag = np.sqrt(np.sum(np.square(Kvec), axis=0))
+        k2 = np.fft.rfftfreq(self.nx[2])*self.nx[2] * self.dk[2]
+        k1 = np.fft.fftfreq(self.nx[1])*self.nx[1] * self.dk[1]
+        k1 = k1[iys:iye].copy()
+        k0 = np.fft.fftfreq(self.nx[0])*self.nx[0] * self.dk[0]
+
+        # MPI local 3D wavemode index
+        self.k = (k0, k1, k2)
+        Kvec = np.array(np.meshgrid(k0, k1, k2, indexing='ij'))
+        self.Kmag = np.sqrt(np.sum(np.square(Kvec), axis=0))
 
         if method == 'akima_flux_diff':
             self.deriv = self._akima_slab_deriv
@@ -830,13 +824,12 @@ class _hitAnalyzer(_baseAnalyzer):
     # -------------------------------------------------------------------------
     # Power Spectral Density Analysis
     # -------------------------------------------------------------------------
-    def spectral_density(self, var, fname, metadata=''):
+    def spectral_density(self, var, fname=None, metadata=''):
         """
         Write the 1D power spectral density of var to text file. Method
         assumes a real input is in physical space and a complex input is
         in Fourier space.
         """
-        assert self._decomp == 1, "ERROR decomp not 1D"
 
         if np.iscomplexobj(var) is True:
             cdata = var
@@ -844,10 +837,10 @@ class _hitAnalyzer(_baseAnalyzer):
             if var.ndim == 3:
                 cdata = tcfft.rfft3(self.comm, var)
             elif var.ndim == 4:
-                cdata = self.vec_fft(var)
+                cdata = self.vfft(var)
             else:
-                raise AttributeError('Input is {}D, '.format(var.ndim)
-                                     +'spectral_density expects 3D or 4D!')
+                raise AttributeError(f'Input is {var.ndim}D, '
+                                     'spectral_density expects 3D or 4D!')
 
         # get spectrum (each task will receive the full spectrum)
         spect3d = np.real(cdata*np.conj(cdata))
@@ -855,10 +848,10 @@ class _hitAnalyzer(_baseAnalyzer):
             spect3d = np.sum(spect3d, axis=0)
         spect3d[..., 0] *= 0.5
 
-        Kmode = (self.Kmag//self.dk.min()).astype(int)
+        Kmode = (self.Kmag//self.dk.max()).astype(int)
         spect1d = tcfft.shell_average(self.comm, spect3d, Kmode)
 
-        if self.comm.rank == 0:
+        if self.comm.rank == 0 and fname:
             fh = open('%s/%s-%s.spectra' % (
                                     self.odir, self.prefix, fname), 'w')
             fh.write('%s\n' % metadata)
@@ -874,7 +867,6 @@ class _hitAnalyzer(_baseAnalyzer):
         ell = (pi/2)*(1/u'^2)*Int{Ek/k}
             = 3*pi/4*Int{Ek/k}/Int{Ek}
         """
-        assert self._decomp == 1, "ERROR decomp not 1D"
 
         return 0.75*np.pi*self.psum(Ek[1:]/self.k[1:])/self.psum(Ek[1:])
 
@@ -882,22 +874,21 @@ class _hitAnalyzer(_baseAnalyzer):
         """
         Convenience function for shell averaging
         """
-        assert self._decomp == 1, "ERROR decomp not 1D"
 
-        Kmode = (self.Kmag//self.dk.min()).astype(int)
+        Kmode = (self.Kmag//self.dk.max()).astype(int)
         return tcfft.shell_average(self.comm, E3, Kmode)
 
-    def filter_kernel(self, ell, gtype='gaussian'):
+    def fft_filter_kernel(self, ell, gtype='gaussian'):
         """
         Empty docstring!
         """
-        assert self._decomp == 1, "ERROR decomp not 1D"
 
         if gtype == 'tophat':
             # THIS IS WRONG STILL, NOT 3D!!!
             Ghat = np.sinc(self.Kmag*ell)
 
         elif gtype == 'gaussian':
+            # THIS IS WRONG NORMALIZATION!!
             Ghat = np.exp(-(1/6)*(ell*self.Kmag)**2)
 
         elif gtype == 'comp_exp':
@@ -924,7 +915,7 @@ class _hitAnalyzer(_baseAnalyzer):
 
         return Ghat
 
-    def scalar_filter(self, phi, Ghat):
+    def fft_filter(self, phi, Ghat):
         """Filter scalar field with a Fourier-domain transfer function.
 
         Assumes `phi` is a 3D scalar spatial field with 1D domain
@@ -943,14 +934,12 @@ class _hitAnalyzer(_baseAnalyzer):
         [M//nprocs, N, P]-shaped ndarray
             Filtered scalar field.
         """
-        assert self._decomp == 1, "ERROR decomp not 1D"
 
         return tcfft.irfft3(self.comm, Ghat*tcfft.rfft3(self.comm, phi))
 
-    def vector_filter(self, u, Ghat):
-        assert self._decomp == 1, "ERROR decomp not 1D"
+    def vfft_filter(self, u, Ghat):
 
-        return self.vec_ifft(Ghat*self.vec_fft(u))
+        return self.ivfft(Ghat*self.vfft(u))
 
     # -------------------------------------------------------------------------
     # FFT Wrapper Methods
@@ -963,8 +952,6 @@ class _hitAnalyzer(_baseAnalyzer):
         """
         assert False, "TODO: fix for unitary ordinary frequency " \
                       "in anisotropic domains"
-
-        assert self._decomp == 1, "ERROR decomp not 1D"
 
         dim = dim % 3
         axis = 2-dim
@@ -983,27 +970,24 @@ class _hitAnalyzer(_baseAnalyzer):
 
         return deriv
 
-    def scl_fft(self, var):
+    def fft(self, var):
         """
         Convenience function for MPI-distributed 3D r2c FFT of scalar.
         """
-        assert self._decomp == 1, "ERROR decomp not 1D"
 
         return tcfft.rfft3(self.comm, var)
 
-    def scl_ifft(self, var):
+    def ifft(self, var):
         """
         Convenience function for MPI-distributed 3D c2r IFFT of scalar.
         """
-        assert self._decomp == 1, "ERROR decomp not 1D"
 
         return tcfft.irfft3(self.comm, var)
 
-    def vec_fft(self, var):
+    def vfft(self, var):
         """
         Convenience function for MPI-distributed 3D r2c FFT of vector.
         """
-        assert self._decomp == 1, "ERROR decomp not 1D"
 
         nnz, ny, nx = var.shape[1:]
         nk = nx//2+1
@@ -1024,11 +1008,10 @@ class _hitAnalyzer(_baseAnalyzer):
 
         return fvar
 
-    def vec_ifft(self, fvar):
+    def ivfft(self, fvar):
         """
         Convenience function for MPI-distributed 3D c2r IFFT of vector.
         """
-        assert self._decomp == 1, "ERROR decomp not 1D"
 
         nz, nny, nk = fvar.shape[1:]
         nx = (nk-1)*2

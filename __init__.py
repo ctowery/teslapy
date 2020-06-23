@@ -1,5 +1,5 @@
 from .mpiAnalyzer import mpiAnalyzer
-from .turbFlameAnalyzer import turbFlameArrhFilteredStats
+from .turbFlameAnalyzer import turbFlameAnalyzer, turbFlameArrhFilteredStats
 from .mpiFileIO import mpiFileIO
 from .misc import LoadInputFile, timeofday
 

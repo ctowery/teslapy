@@ -100,7 +100,7 @@ class _binaryFileIO(object):
             else:
                 raise IndexError("The length of N must be either 1 or ndims")
         else:
-            self._nxf = np.array([N]*ndims, dtype=int)
+            self._nxf = np.array([N, ]*ndims, dtype=int)
         nxf = self._nxf
 
         if decomp is None:
