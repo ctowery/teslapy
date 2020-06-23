@@ -848,7 +848,7 @@ class _hitAnalyzer(_baseAnalyzer):
             spect3d = np.sum(spect3d, axis=0)
         spect3d[..., 0] *= 0.5
 
-        Kmode = (self.Kmag//self.dk.max()).astype(int)
+        Kmode = (self.Kmag//self.dk[2]).astype(int)
         spect1d = tcfft.shell_average(self.comm, spect3d, Kmode)
 
         if self.comm.rank == 0 and fname:
@@ -867,15 +867,16 @@ class _hitAnalyzer(_baseAnalyzer):
         ell = (pi/2)*(1/u'^2)*Int{Ek/k}
             = 3*pi/4*Int{Ek/k}/Int{Ek}
         """
-
-        return 0.75*np.pi*self.psum(Ek[1:]/self.k[1:])/self.psum(Ek[1:])
+        Ek = Ek[1:]
+        kvec = self.k[2][1:]
+        return 0.75*np.pi*self.psum(Ek/kvec)/self.psum(Ek)
 
     def shell_average(self, E3):
         """
         Convenience function for shell averaging
         """
 
-        Kmode = (self.Kmag//self.dk.max()).astype(int)
+        Kmode = (self.Kmag//self.dk[2]).astype(int)
         return tcfft.shell_average(self.comm, E3, Kmode)
 
     def fft_filter_kernel(self, ell, gtype='gaussian'):
