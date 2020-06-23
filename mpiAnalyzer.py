@@ -864,14 +864,14 @@ class _hitAnalyzer(_baseAnalyzer):
         """
         Computes the integral scale from the standard formula,
         where u'^2 = 2/3*Int{Ek}
-        ell = (pi/2)*(1/u'^2)*Int{Ek/k}
-            = 3*pi/4*Int{Ek/k}/Int{Ek}
+        ell = (1/u'^2)*Int{Ek/k}
+            = 3/2*Int{Ek/k}/Int{Ek}
 
         If k is angular wavenumber!
         """
         Ek = Ek[1:]
         kvec = self.k[2][1:]
-        return self.psum(Ek/kvec)/(2/3*self.psum(Ek))
+        return self.psum(Ek/kvec)/self.psum(Ek)
 
     def shell_average(self, E3):
         """
