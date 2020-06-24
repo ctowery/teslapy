@@ -860,18 +860,19 @@ class _hitAnalyzer(_baseAnalyzer):
 
         return spect1d
 
-    def integral_scale(self, Ek):
+    def integral_scale(self, spect1d):
         """
-        Computes the integral scale from the standard formula,
-        where u'^2 = 2/3*Int{Ek}
-        ell = (1/u'^2)*Int{Ek/k}
-            = 3/2*Int{Ek/k}/Int{Ek}
-
-        If k is angular wavenumber!
+        Computes the integral scale from the formula in Frisch95,
+        where ell = (pi/2) * Sum{E1d/w} / u^2 in angular wavenumber w
+        and u^2 = 2/3*Sum{E1d}
+        such that ell = (3*pi/4) * Sum{E1d/w} / Sum{E1d}.
+        Now, since w = 2*pi*k,
+        ell = (3*pi/4)/(2*pi) * Sum{E1d/k} / Sum{E1d}
+            = (3/8) * Sum{E1d/k} / Sum{E1d} in ordinary wavenumber k.
         """
-        Ek = Ek[1:]
-        kvec = self.k[2][1:]
-        return self.psum(Ek/kvec)/self.psum(Ek)
+        E1d = spect1d[1:]
+        k = self.k[2][1:]
+        return 0.375 * self.psum(E1d/k) / self.psum(E1d)
 
     def shell_average(self, E3):
         """
