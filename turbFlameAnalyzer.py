@@ -72,7 +72,7 @@ class turbFlameAnalyzer(_hitAnalyzer):
 
         return out
 
-    def dump_slices(self, var, var_name, ix=None, jy=0, kz=None):
+    def dump_slices(self, var, ix=None, jy=0, kz=None, tag=None):
         """Dump 2D slices from 3D scalar field.
 
         `dump_slices` currently assumes 1D domain decomposition along
@@ -89,17 +89,13 @@ class turbFlameAnalyzer(_hitAnalyzer):
         if ix:
             data = self.comm.gather(var[:, :, ix])
             if self.comm.rank == 0:
-                x_slices = np.concatenate(data, axis=0)
-                filename = f'{self.odir}/{self.pid}_{var_name}-xslices.npy'
-                np.save(filename, x_slices.astype('f4'), allow_pickle=False)
+                x_slices = np.concatenate(data, axis=0).astype('f4')
 
         y_slices = None
         if jy:
             data = self.comm.gather(var[:, jy, :])
             if self.comm.rank == 0:
-                y_slices = np.concatenate(data, axis=0)
-                filename = f'{self.odir}/{self.pid}_{var_name}-yslices.npy'
-                np.save(filename, y_slices.astype('f4'), allow_pickle=False)
+                y_slices = np.concatenate(data, axis=0).astype('f4')
 
         z_slices = None
         if kz:
@@ -107,9 +103,13 @@ class turbFlameAnalyzer(_hitAnalyzer):
             bool_idx = [k in np.atleast_1d(kz) for k in krange]
             data = self.comm.gather(var[bool_idx, :, :])
             if self.comm.rank == 0:
-                z_slices = np.concatenate(data, axis=0)
-                filename = f'{self.odir}/{self.pid}_{var_name}-zslices.npy'
-                np.save(filename, z_slices.astype('f4'), allow_pickle=False)
+                z_slices = np.concatenate(data, axis=0).astype('f4')
+
+        if self.comm.rank == 0 and tag is not None:
+            filename = f'{self.odir}/{self.pid}_{tag}-slices.npz'
+            np.savez(filename, allow_pickle=False,
+                     x_slices=x_slices, y_slices=y_slices, z_slices=z_slices,
+                     x_locs=ix, y_locs=jy, z_locs=kz)
 
         return x_slices, y_slices, z_slices
 
