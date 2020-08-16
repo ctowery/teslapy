@@ -72,7 +72,7 @@ class turbFlameAnalyzer(_hitAnalyzer):
 
         return out
 
-    def dump_slices(self, var, ix=None, jy=0, kz=None, tag=None):
+    def dump_slices(self, var, ix=0, jy=0, kz=None, tag=None):
         """Dump 2D slices from 3D scalar field.
 
         `dump_slices` currently assumes 1D domain decomposition along
@@ -85,18 +85,22 @@ class turbFlameAnalyzer(_hitAnalyzer):
             jy = (jy, )
         if np.isscalar(kz):
             kz = (kz, )
+
+        # --------------------------------------------------------------
         x_slices = None
         if ix:
             data = self.comm.gather(var[:, :, ix])
             if self.comm.rank == 0:
                 x_slices = np.concatenate(data, axis=0).astype('f4')
 
+        # --------------------------------------------------------------
         y_slices = None
         if jy:
             data = self.comm.gather(var[:, jy, :])
             if self.comm.rank == 0:
                 y_slices = np.concatenate(data, axis=0).astype('f4')
 
+        # --------------------------------------------------------------
         z_slices = None
         if kz:
             krange = range(self.ixs[0], self.ixe[0])
@@ -105,6 +109,7 @@ class turbFlameAnalyzer(_hitAnalyzer):
             if self.comm.rank == 0:
                 z_slices = np.concatenate(data, axis=0).astype('f4')
 
+        # --------------------------------------------------------------
         if self.comm.rank == 0 and tag is not None:
             filename = f'{self.odir}/{self.pid}_{tag}-slices.npz'
             np.savez(filename, allow_pickle=False,
@@ -112,6 +117,47 @@ class turbFlameAnalyzer(_hitAnalyzer):
                      x_locs=ix, y_locs=jy, z_locs=kz)
 
         return x_slices, y_slices, z_slices
+
+    def dump_2d_diagnostics(self, var, tag=None):
+        """Dump 2D slices for diagnostic exploration from 3D scalar field.
+
+        `dump_2d_diagnostics` currently assumes 1D domain decomposition along
+        0th axis. Would definitely need to rethink this for a generic
+        N-dimensional domain decomposition."""
+
+        dx = var.shape[2]//4
+        ix = (0, dx, 2*dx, 3*dx)
+
+        dy = var.shape[1]//4
+        jy = (0, dy, 2*dy, 3*dy)
+
+        # --------------------------------------------------------------
+        x_slices = None
+        data = self.comm.gather(var[:, :, ix])
+        if self.comm.rank == 0:
+            x_slices = np.concatenate(data, axis=0).astype('f4')
+
+        data = self.comm.allgather(var.mean(axis=2))
+        x_avg = np.concatenate(data, axis=0).astype('f4')
+
+        # --------------------------------------------------------------
+        y_slices = None
+        data = self.comm.gather(var[:, jy, :])
+        if self.comm.rank == 0:
+            y_slices = np.concatenate(data, axis=0).astype('f4')
+
+        data = self.comm.allgather(var.mean(axis=1))
+        y_avg = np.concatenate(data, axis=0).astype('f4')
+
+        # --------------------------------------------------------------
+        if self.comm.rank == 0 and tag is not None:
+            filename = f'{self.odir}/{self.pid}_{tag}-slices.npz'
+            np.savez(filename, allow_pickle=False,
+                     x_slices=x_slices, y_slices=y_slices,
+                     x_locs=ix, y_locs=jy,
+                     x_avg=x_avg, y_avg=y_avg)
+
+        return x_avg, y_avg
 
 
 ###############################################################################
@@ -131,7 +177,6 @@ class turbFlameArrhFilteredStats(turbFlameAnalyzer):
     parser.add_argument('--its', type=int)
     parser.add_argument('--ite', type=int)
     parser.add_argument('--tint', type=int)
-    parser.add_argument('--ntm', type=int)
     parser.add_argument('--iz0', type=int)
     parser.add_argument('--gamma', type=float)
     parser.add_argument('--speed', type=float)
