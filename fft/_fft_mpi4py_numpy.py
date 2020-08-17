@@ -85,8 +85,8 @@ def rfft3(comm, u, fu=None):
     temp1 = np.empty([nnz, ny, nk], dtype=np.complex128)
 
     temp1[:] = np.fft.rfft2(u, axes=(1, 2))
-    fu[:] = np.rollaxis(temp1.reshape([nnz, ntasks, nny, nk]),
-                        1).reshape(fu.shape)
+    fu[:] = np.rollaxis(temp1.reshape([nnz, ntasks, nny, nk]), 1
+                        ).reshape(fu.shape)
     comm.Alltoall(MPI.IN_PLACE, [fu, MPI.DOUBLE_COMPLEX])  # send, receive
     fu[:] = np.fft.fft(fu, axis=0)
 

@@ -125,29 +125,33 @@ class turbFlameAnalyzer(_hitAnalyzer):
         0th axis. Would definitely need to rethink this for a generic
         N-dimensional domain decomposition."""
 
-        dx = var.shape[2]//4
-        ix = (0, dx, 2*dx, 3*dx)
+        dx = var.shape[2]//2
+        ix = (0, dx)
 
-        dy = var.shape[1]//4
-        jy = (0, dy, 2*dy, 3*dy)
+        dy = var.shape[1]//2
+        jy = (0, dy)
 
         # --------------------------------------------------------------
         x_slices = None
-        data = self.comm.gather(var[:, :, ix])
+        data = self.comm.gather(var[::4, ::4, ix])
         if self.comm.rank == 0:
             x_slices = np.concatenate(data, axis=0).astype('f4')
 
-        data = self.comm.allgather(var.mean(axis=2))
-        x_avg = np.concatenate(data, axis=0).astype('f4')
+        x_avg = None
+        data = self.comm.gather(var[::4, ::4, :].mean(axis=2))
+        if self.comm.rank == 0:
+            x_avg = np.concatenate(data, axis=0).astype('f4')
 
         # --------------------------------------------------------------
         y_slices = None
-        data = self.comm.gather(var[:, jy, :])
+        data = self.comm.gather(var[::4, jy, ::4])
         if self.comm.rank == 0:
             y_slices = np.concatenate(data, axis=0).astype('f4')
 
-        data = self.comm.allgather(var.mean(axis=1))
-        y_avg = np.concatenate(data, axis=0).astype('f4')
+        y_avg = None
+        data = self.comm.gather(var[::4, :, ::4].mean(axis=1))
+        if self.comm.rank == 0:
+            y_avg = np.concatenate(data, axis=0).astype('f4')
 
         # --------------------------------------------------------------
         if self.comm.rank == 0 and tag is not None:
