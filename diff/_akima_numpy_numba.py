@@ -74,7 +74,7 @@ def _deriv(phi, h, axis=0):
     return deriv
 
 
-@jit(nopython=True, nogil=True, cache=True)
+@jit(nopython=True) # , nogil=True, cache=True
 def flux_diff(var, dx, axis=0, ng=3):
     """
     1st order difference of interpolated midpoints along given axis of var.
@@ -110,7 +110,7 @@ def flux_diff(var, dx, axis=0, ng=3):
     return out
 
 
-@jit(nopython=True, nogil=True, cache=True)
+@jit(nopython=True) # , nogil=True, cache=True
 def fast_interp(f, dx):
     """
     Returns scalar function values at midpoint locations of a uniform
@@ -141,7 +141,7 @@ def fast_interp(f, dx):
     return fi
 
 
-@jit(nopython=True, nogil=True, cache=True)
+@jit(nopython=True) # , nogil=True, cache=True
 def interp1d(x, f, xi, limit_extrema=False):
     """
     Returns scalar function values at any number of points in
