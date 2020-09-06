@@ -131,25 +131,29 @@ class turbFlameAnalyzer(_hitAnalyzer):
         dy = var.shape[1]//2
         jy = (0, dy)
 
+        kzs = self.ixs[0]
+        kze = self.ixe[0]
+        kz = np.where(np.arange(kzs, kze) % 4 == 0)[0]
+
         # --------------------------------------------------------------
         x_slices = None
-        data = self.comm.gather(var[::4, ::4, ix])
+        data = self.comm.gather(var[kz, ::4, ix])
         if self.comm.rank == 0:
             x_slices = np.concatenate(data, axis=0).astype('f4')
 
         x_avg = None
-        data = self.comm.gather(var[::4, ::4, :].mean(axis=2))
+        data = self.comm.gather(var[kz, ::4, :].mean(axis=2))
         if self.comm.rank == 0:
             x_avg = np.concatenate(data, axis=0).astype('f4')
 
         # --------------------------------------------------------------
         y_slices = None
-        data = self.comm.gather(var[::4, jy, ::4])
+        data = self.comm.gather(var[kz, jy, ::4])
         if self.comm.rank == 0:
             y_slices = np.concatenate(data, axis=0).astype('f4')
 
         y_avg = None
-        data = self.comm.gather(var[::4, :, ::4].mean(axis=1))
+        data = self.comm.gather(var[kz, :, ::4].mean(axis=1))
         if self.comm.rank == 0:
             y_avg = np.concatenate(data, axis=0).astype('f4')
 
