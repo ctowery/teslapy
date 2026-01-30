@@ -29,13 +29,13 @@ https://github.com/teslacu/spectralLES.git
 
 from mpi4py import MPI
 import numpy as np
-import os
+# import os
 import sys
 import time
 from math import sqrt, pi
 import argparse
-from spectralLES import staticSmagorinskyLES
-# from teslacu import mpiWriter
+from spectralLES import spectralLES, staticSmagorinskyLES
+# from teslacu import mpiFileIO
 from teslacu.fft import shell_average
 from teslacu.stats import psum
 
@@ -126,7 +126,7 @@ def staticSmag_HIT_demo(pp=None, sp=None):
 
     # ------------------------------------------------------------------
     # Configure a spatial field writer
-    writer = mpiWriter(comm, odir=pp.odir, N=N)
+    # writer = mpiFileIO(comm, odir=pp.odir, N=N)
     Ek_fmt = "\\widehat{{{0}}}^*\\widehat{{{0}}}".format
 
     # -------------------------------------------------------------------------

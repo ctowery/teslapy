@@ -250,8 +250,8 @@ def ABC_static_test(pp=None, sp=None):
 
     solver.computeAD = solver.computeAD_vorticity_form
     Sources = [solver.computeSource_linear_forcing,
-               solver.computeSource_Smagorinsky_SGS,
-               # solver.computeSource_4termGEV_SGS,
+               # solver.computeSource_Smagorinsky_SGS,
+               solver.computeSource_4termGEV_SGS,
                ]
 
     # C1 = np.array([-6.39e-02])

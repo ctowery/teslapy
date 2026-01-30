@@ -45,7 +45,7 @@ comm = MPI.COMM_WORLD
 # Define the problem ("main" function)
 ###############################################################################
 def nomodel_HIT_demo(pp=None, sp=None):
-   """
+    """
     Arguments:
     ----------
     pp: (optional) program parameters, parsed by argument parser
